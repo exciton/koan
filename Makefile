@@ -13,6 +13,9 @@ PYTHON_BIN ?= python3
 
 VENV   ?= .venv
 PYTHON ?= $(VENV)/bin/$(PYTHON_BIN)
+# Absolute, normalized path — avoids `koan/../.venv/...` warnings from CPython's
+# site module when the interpreter is invoked after `cd koan`.
+PYTHON_ABS := $(abspath $(PYTHON))
 
 # --- pytest-xdist worker count ---
 # Auto-pick the worker count for `make test` based on the environment:
@@ -62,14 +65,14 @@ $(VENV)/.installed: koan/requirements.txt
 	@touch $@
 
 awake: setup
-	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/awake.py
+	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) app/awake.py
 
 run: setup
-	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/run.py
+	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) app/run.py
 
 say: setup
 	@test -n "$(m)" || (echo "Usage: make say m=\"your message\"" && exit 1)
-	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -c "from app.awake import handle_message; handle_message('$(m)')"
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) -c "from app.awake import handle_message; handle_message('$(m)')"
 
 lint: setup
 	$(VENV)/bin/pip install -q ruff 2>/dev/null
@@ -78,7 +81,7 @@ lint: setup
 test: setup
 	@echo "→ pytest workers: $(PYTEST_WORKERS)"
 	$(VENV)/bin/pip install -q pytest pytest-cov pytest-xdist 2>/dev/null
-	cd koan && KOAN_ROOT=/tmp/test-koan PYTHONPATH=. ../$(PYTHON) -m pytest tests/ -v $(PYTEST_XDIST_ARGS) --cov=app --cov-report=term-missing --cov-report=html:htmlcov
+	cd koan && KOAN_ROOT=/tmp/test-koan PYTHONPATH=. $(PYTHON_ABS) -m pytest tests/ -v $(PYTEST_XDIST_ARGS) --cov=app --cov-report=term-missing --cov-report=html:htmlcov
 	@$(MAKE) --no-print-directory test-skills
 
 test-skills: setup
@@ -93,7 +96,7 @@ test-skills: setup
 test-strict: setup
 	@echo "→ running full test suite in strict mode (0 failures required, workers: $(PYTEST_WORKERS))"
 	$(VENV)/bin/pip install -q pytest pytest-cov pytest-xdist 2>/dev/null
-	@cd koan && KOAN_ROOT=/tmp/test-koan PYTHONPATH=. ../$(PYTHON) -m pytest tests/ -q --tb=short $(PYTEST_XDIST_ARGS) \
+	@cd koan && KOAN_ROOT=/tmp/test-koan PYTHONPATH=. $(PYTHON_ABS) -m pytest tests/ -q --tb=short $(PYTEST_XDIST_ARGS) \
 		|| (echo "✗ tests failed — aborting" && exit 1)
 	@if [ -d instance/skills ] && find -L instance/skills -path '*/tests/test_*.py' -print -quit 2>/dev/null | grep -q .; then \
 		KOAN_REPO=$(PWD) KOAN_ROOT=/tmp/test-koan PYTHONPATH=koan $(PYTHON) -m pytest instance/skills/ -q --tb=short $(PYTEST_XDIST_ARGS) \
@@ -105,10 +108,10 @@ release: setup
 	@bash scripts/release.sh
 
 migrate: setup
-	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/migrate_memory.py
+	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) app/migrate_memory.py
 
 dashboard: setup
-	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/dashboard.py
+	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) app/dashboard.py
 
 restart:
 	$(MAKE) stop
@@ -150,7 +153,7 @@ start: setup
 	@if [ -f ~/Library/LaunchAgents/com.koan.dashboard.plist ]; then \
 		launchctl bootstrap "gui/$$(id -u)" ~/Library/LaunchAgents/com.koan.dashboard.plist 2>/dev/null || true; \
 	fi
-	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -c "from pathlib import Path; from app.pid_manager import _show_startup_banner; from app.utils import get_cli_provider_env; _show_startup_banner(Path('$(PWD)'), get_cli_provider_env())"
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) -c "from pathlib import Path; from app.pid_manager import _show_startup_banner; from app.utils import get_cli_provider_env; _show_startup_banner(Path('$(PWD)'), get_cli_provider_env())"
 	@echo "✓ Kōan started via launchd"
 
 stop:
@@ -166,7 +169,7 @@ status:
 else
 
 start: setup
-	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager start-all $(PWD)
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) -m app.pid_manager start-all $(PWD)
 
 stop: setup
 	@if [ "$$(uname -s)" = "Darwin" ] && launchctl list com.koan.run >/dev/null 2>&1; then \
@@ -174,10 +177,10 @@ stop: setup
 		launchctl bootout "gui/$$(id -u)/com.koan.run" 2>/dev/null || true; \
 		launchctl bootout "gui/$$(id -u)/com.koan.awake" 2>/dev/null || true; \
 	fi
-	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager stop-all $(PWD)
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) -m app.pid_manager stop-all $(PWD)
 
 status: setup
-	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager status-all $(PWD)
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) -m app.pid_manager status-all $(PWD)
 
 endif
 
@@ -193,11 +196,11 @@ errand-run: setup
 	caffeinate -i $(MAKE) run
 
 errand-awake: setup
-	caffeinate -i sh -c 'cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/awake.py'
+	caffeinate -i sh -c 'cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) app/awake.py'
 
 ollama: setup
 	@echo "→ Starting Kōan with Ollama stack..."
-	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.pid_manager start-stack $(PWD)
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) -m app.pid_manager start-stack $(PWD)
 
 logs:
 	@mkdir -p logs
@@ -212,15 +215,15 @@ install:
 	@echo "→ Starting Kōan Setup Wizard..."
 	@$(PYTHON) -m venv $(VENV) 2>/dev/null || true
 	@$(VENV)/bin/pip install -q flask 2>/dev/null || pip3 install -q flask 2>/dev/null
-	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) app/setup_wizard.py
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) app/setup_wizard.py
 
 onboard: setup
-	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.onboarding $(ARGS)
+	@cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) -m app.onboarding $(ARGS)
 
 rename-project: setup
 	@test -n "$(old)" || (echo "Usage: make rename-project old=foo new=bar [apply=1]" && exit 1)
 	@test -n "$(new)" || (echo "Usage: make rename-project old=foo new=bar [apply=1]" && exit 1)
-	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. ../$(PYTHON) -m app.rename_project $(old) $(new) $(if $(apply),--apply,)
+	cd koan && KOAN_ROOT=$(PWD) PYTHONPATH=. $(PYTHON_ABS) -m app.rename_project $(old) $(new) $(if $(apply),--apply,)
 
 clean:
 	rm -rf $(VENV)
