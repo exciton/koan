@@ -9,6 +9,8 @@ export
 .PHONY: install-launchd-service uninstall-launchd-service
 .PHONY: docker-setup docker-up docker-down docker-logs docker-test docker-auth docker-gh-auth
 
+.DEFAULT_GOAL := koan
+
 PYTHON_BIN ?= python3
 
 VENV   ?= .venv
