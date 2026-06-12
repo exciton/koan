@@ -853,6 +853,34 @@ class TestRecoverPendingJournalTOCTOU:
         assert count == 1
 
 
+class TestPendingJournalSingleUse:
+    """pending.md context should only be claimed by the first in-progress mission."""
+
+    def test_only_first_mission_gets_partial_state(self, instance_dir):
+        """With two stale in-progress missions, only the first is 'partial'."""
+        missions = instance_dir / "missions.md"
+        missions.write_text(_missions(in_progress="- Task A\n- Task B"))
+
+        pending_path = instance_dir / "journal" / "pending.md"
+        pending_path.parent.mkdir(parents=True, exist_ok=True)
+        pending_path.write_text("# Mission\n---\nsome progress\n")
+
+        log_path = instance_dir / "recovery.jsonl"
+        count, _ = recover_missions(str(instance_dir))
+
+        # Both missions should be recovered
+        assert count == 2
+
+        # Read audit log to check states
+        import json
+        events = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+        by_mission = {e["mission"]: e["state"] for e in events}
+
+        # First mission claims the journal → partial; second is dead
+        assert by_mission.get("- Task A") == "partial"
+        assert by_mission.get("- Task B") == "dead"
+
+
 class TestDryRun:
     """Dry-run mode classifies without modifying missions.md."""
 

@@ -236,6 +236,11 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
         escalated = []      # missions to move to Failed
         remaining_in_progress = []
         in_complex_mission = False
+        # pending.md context belongs to at most one mission (the one that was
+        # running when the process was interrupted). Consume it on first use so
+        # subsequent missions in the same In Progress block are not all marked
+        # "partial" — which would give them misleading "recovery context" status.
+        journal_available = has_pending_journal
 
         for i in range(in_progress_start + 1, in_progress_end):
             line = lines[i]
@@ -266,12 +271,15 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
                     cp = _read_cp(instance_dir, clean_text)
                     has_checkpoint = cp is not None
 
-                # Classify this mission
+                # Classify this mission; journal context is single-use
                 state = classify_mission_state(
                     line,
-                    has_pending_journal=has_pending_journal,
+                    has_pending_journal=journal_available,
                     has_checkpoint=has_checkpoint,
                 )
+                # Once a mission claims the journal context, mark it consumed
+                if journal_available and state == "partial":
+                    journal_available = False
                 attempts = _get_recovery_attempts(line)
 
                 if dry_run:
