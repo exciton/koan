@@ -147,7 +147,6 @@ def get_chat_id_from_updates(token: str) -> Optional[str]:
     return None
 
 
-
 def has_instance(koan_root: Path) -> bool:
     """Return True when the private instance and env file exist."""
     paths = paths_for_root(koan_root)
