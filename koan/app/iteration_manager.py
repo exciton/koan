@@ -1460,10 +1460,13 @@ def plan_iteration(
     recurring_injected = _inject_recurring(instance)
 
     # Step 3b: Drain CI queue (one entry per iteration, non-blocking)
-    ci_drain_msg = _drain_ci_queue(instance)
+    ci_drain_msg = None
+    from app.config import is_ci_check_enabled
+    if is_ci_check_enabled():
+        ci_drain_msg = _drain_ci_queue(instance)
 
-    # Step 3c: Auto-dispatch CI fix missions for failing Koan PRs
-    _dispatch_ci_fixes(instance, koan_root)
+        # Step 3c: Auto-dispatch CI fix missions for failing Koan PRs
+        _dispatch_ci_fixes(instance, koan_root)
 
     # Step 4: Pick mission. Manual missions (queued in missions.md or via
     # notifications) are always eligible regardless of branch saturation —

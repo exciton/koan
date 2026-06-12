@@ -18,6 +18,13 @@ def handle(ctx):
     using Claude. Typically auto-triggered after a rebase, but
     can be invoked manually.
     """
+    try:
+        from app.config import is_ci_check_enabled
+        if not is_ci_check_enabled():
+            return "CI check system is disabled in config.yaml (ci_check.enabled: false)."
+    except ImportError:
+        pass
+
     args = ctx.args.strip()
 
     if not args:

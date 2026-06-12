@@ -127,6 +127,12 @@ class TestCiCheckOwnership:
             assert "queued" in result.lower()
             mock_insert.assert_called_once()
 
+    def test_disabled_via_config(self, handler, ctx):
+        ctx.args = "https://github.com/sukria/koan/pull/55"
+        with patch("app.config.is_ci_check_enabled", return_value=False):
+            result = handler.handle(ctx)
+            assert "disabled" in result.lower()
+
 
 # ---------------------------------------------------------------------------
 # check_runner — ownership guard on auto-queued rebase

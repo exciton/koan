@@ -1454,6 +1454,14 @@ def _enqueue_ci_check(
         actions_log.append("CI check skipped (KOAN_ROOT not set)")
         return "CI check skipped (not running under Kōan)."
 
+    try:
+        from app.config import is_ci_check_enabled
+        if not is_ci_check_enabled():
+            actions_log.append("CI check skipped (disabled in config)")
+            return "CI check skipped (disabled in config)."
+    except ImportError:
+        pass
+
     instance_dir = os.path.join(koan_root, "instance")
     pr_url = context.get("url") or f"https://github.com/{full_repo}/pull/{pr_number}"
 

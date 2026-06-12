@@ -733,7 +733,7 @@ Fetches the PR diff or issue description, compares it against the current main b
 
 - **Usage:** `/ci_check <pr-url>`
 
-Usually auto-triggered when CI fails after a `/rebase`, but can also be invoked manually. Fetches failure logs, checks out the PR branch, and runs Claude to attempt a fix. If the fix produces a commit, it force-pushes and re-enqueues the PR for CI monitoring.
+Usually auto-triggered when CI fails after a `/rebase`, but can also be invoked manually. Fetches failure logs, checks out the PR branch, and runs Claude to attempt a fix. If the fix produces a commit, it force-pushes and re-enqueues the PR for CI monitoring. Requires `ci_check.enabled: true` in config.yaml (the default).
 
 <details>
 <summary>Use cases</summary>
@@ -1679,9 +1679,20 @@ Edit `instance/soul.md` to define Kōan's personality. This file shapes how Kōa
 
 The design principle: code is generic and open source; instance data (including personality) is private. Fork the repo, write your own soul.
 
+### CI Check System
+
+The CI check system monitors your PRs for CI failures and can automatically attempt fixes. It includes CI queue draining (after `/rebase`), auto-dispatch of fix missions, and the `/ci_check` skill. Enabled by default — disable to save tokens if you don't need CI monitoring.
+
+```yaml
+ci_check:
+  enabled: true              # Master switch (default: true)
+```
+
+When disabled, all CI-related automation is skipped: queue draining, CI dispatch, CI enqueue after rebase, and the `/ci_check` command returns an error.
+
 ### CI Dispatch
 
-Kōan can automatically create fix missions when CI fails on its own PRs. When enabled, each iteration checks open Koan-authored PRs for failing check runs and inserts a fix mission with the failure log snippet. Dedup prevents re-dispatching the same failure.
+Kōan can automatically create fix missions when CI fails on its own PRs. When enabled, each iteration checks open Koan-authored PRs for failing check runs and inserts a fix mission with the failure log snippet. Dedup prevents re-dispatching the same failure. Only active when `ci_check.enabled` is true.
 
 ```yaml
 ci_dispatch:
