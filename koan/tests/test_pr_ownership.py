@@ -127,6 +127,35 @@ class TestCiCheckOwnership:
             assert "queued" in result.lower()
             mock_insert.assert_called_once()
 
+    def test_disabled_via_config(self, handler, ctx):
+        ctx.args = "https://github.com/sukria/koan/pull/55"
+        with patch("app.config.is_ci_check_enabled", return_value=False):
+            result = handler.handle(ctx)
+            assert "disabled" in result.lower()
+
+    def test_enable_toggle(self, handler, ctx, tmp_path, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        (tmp_path / "instance").mkdir(exist_ok=True)
+        (tmp_path / "instance" / "config.yaml").write_text("ci_check:\n  enabled: false\n")
+        ctx.args = "--enable"
+        with patch("app.utils.update_config_yaml") as mock_update:
+            result = handler.handle(ctx)
+        assert "enabled" in result.lower()
+        mock_update.assert_called_once()
+        assert mock_update.call_args[0][1] == ["ci_check", "enabled"]
+        assert mock_update.call_args[0][2] is True
+
+    def test_disable_toggle(self, handler, ctx, tmp_path, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        (tmp_path / "instance").mkdir(exist_ok=True)
+        (tmp_path / "instance" / "config.yaml").write_text("ci_check:\n  enabled: true\n")
+        ctx.args = "--disable"
+        with patch("app.utils.update_config_yaml") as mock_update:
+            result = handler.handle(ctx)
+        assert "disabled" in result.lower()
+        mock_update.assert_called_once()
+        assert mock_update.call_args[0][2] is False
+
 
 # ---------------------------------------------------------------------------
 # check_runner — ownership guard on auto-queued rebase

@@ -25,6 +25,7 @@ from app.rebase_pr import (
     _build_rebase_recovery_guidance,
     _checkout_pr_branch,
     _check_if_already_solved,
+    _enqueue_ci_check,
     _close_pr_as_duplicate,
     _filter_bot_issue_comments,
     _find_remote_for_repo,
@@ -3809,3 +3810,22 @@ class TestBuildRebaseRecoveryGuidance:
             assert "unknown" in result.lower() or "dirty" in result.lower()
             captured = capsys.readouterr()
             assert "git status failed" in captured.err
+
+
+class TestEnqueueCiCheckConfigGate:
+    """Verify _enqueue_ci_check respects ci_check.enabled config."""
+
+    def test_skips_when_disabled(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+        actions = []
+        with patch("app.config.is_ci_check_enabled", return_value=False):
+            result = _enqueue_ci_check(
+                branch="koan/fix",
+                full_repo="owner/repo",
+                pr_number="42",
+                project_path=str(tmp_path),
+                context={"url": "https://github.com/owner/repo/pull/42"},
+                actions_log=actions,
+            )
+        assert "disabled" in result.lower()
+        assert any("disabled" in a.lower() for a in actions)

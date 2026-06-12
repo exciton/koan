@@ -640,6 +640,29 @@ def get_cli_output_journal() -> bool:
     return bool(value)
 
 
+def is_ci_check_enabled() -> bool:
+    """Check if the CI check system is enabled.
+
+    Controls the entire CI check pipeline: queue draining, auto-dispatch
+    of fix missions on CI failures, and the ``/ci_check`` skill command.
+    Disable to save tokens when CI monitoring is not needed.
+
+    Config key: ci_check.enabled (default: True)
+    """
+    config = _load_config()
+    ci_cfg = config.get("ci_check", {})
+    if isinstance(ci_cfg, dict):
+        return bool(ci_cfg.get("enabled", True))
+    if isinstance(ci_cfg, bool):
+        return ci_cfg
+    import sys
+    print(
+        f"[config] ci_check has unexpected type {type(ci_cfg).__name__!r}, defaulting to enabled",
+        file=sys.stderr,
+    )
+    return True
+
+
 def get_max_runs() -> int:
     """Get maximum runs per day from config.yaml.
 
