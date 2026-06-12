@@ -4,7 +4,6 @@ Usually auto-injected by ci_queue_runner.drain_one() when CI fails,
 but can also be triggered manually via Telegram.
 """
 
-from app.config import is_ci_check_enabled
 from app.github_url_parser import parse_pr_url
 import app.github_skill_helpers as _gh_helpers
 
@@ -43,6 +42,7 @@ def handle(ctx):
     if args in ("--enable", "--disable"):
         return _handle_toggle(args)
 
+    from app.config import is_ci_check_enabled
     if not is_ci_check_enabled():
         return "CI check system is disabled in config.yaml (ci_check.enabled: false)."
 
