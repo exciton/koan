@@ -974,14 +974,17 @@ When exploration is enabled, Kōan may autonomously explore a project's codebase
 - **Aliases:** `/exploration`
 
 **`/noexplore`** — Disable exploration for a project.
-- **Usage:** `/noexplore [project]`
+- **Usage:** `/noexplore [project|all]`
+
+Using `all` or `none` also sets the default for future projects added via `/add_project` or workspace discovery.
 
 <details>
 <summary>Use cases</summary>
 
 - `/explore webapp` — Let Kōan explore the webapp codebase
-- `/explore all` — Enable exploration for all projects
-- `/noexplore` — Disable exploration (focus on missions only)
+- `/explore all` — Enable exploration for all projects + set default
+- `/noexplore backend` — Disable exploration for one project
+- `/noexplore all` — Disable exploration for all projects + set default
 </details>
 
 ### Autoreview Mode

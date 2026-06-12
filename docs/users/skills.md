@@ -135,7 +135,7 @@ Skills marked **GitHub @mention** can be triggered by commenting `@koan-bot <com
 | `/unfocus` | — | Exit focus mode |
 | `/passive [duration]` | — | Enter read-only passive mode |
 | `/active` | — | Exit passive mode, resume execution |
-| `/explore [project]` | `/exploration`, `/noexplore` | Toggle per-project exploration mode |
+| `/explore [project\|all\|none]` | `/exploration`, `/noexplore [project\|all]` | Toggle per-project exploration mode; `all`/`none` also sets default for future projects |
 | `/autoreview [project]` | `/auto_review`, `/noautoreview` | Toggle automatic review+rebase after PR creation per project |
 | `/language <lang>` | `/lng`, `/fr`, `/en` | Set reply language preference |
 
