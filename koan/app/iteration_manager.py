@@ -130,7 +130,8 @@ def _downgrade_if_burning_fast(instance_dir: Path, session_pct: float,
     return downgraded, mode
 
 
-def _get_usage_decision(usage_md: Path, count: int, projects_str: str):
+def _get_usage_decision(usage_md: Path, count: int, projects_str: str,
+                        budget_mode: Optional[str] = None):
     """Parse usage.md and decide autonomous mode.
 
     Returns:
@@ -138,7 +139,8 @@ def _get_usage_decision(usage_md: Path, count: int, projects_str: str):
     """
     try:
         from app.usage_tracker import UsageTracker, _get_budget_mode, _get_budget_thresholds
-        budget_mode = _get_budget_mode()
+        if budget_mode is None:
+            budget_mode = _get_budget_mode()
         warn_pct, stop_pct = _get_budget_thresholds()
         tracker = UsageTracker(usage_md, count, budget_mode=budget_mode,
                                warn_pct=warn_pct, stop_pct=stop_pct)
@@ -146,12 +148,15 @@ def _get_usage_decision(usage_md: Path, count: int, projects_str: str):
 
         # Burn-rate downgrade: applied here (not inside UsageTracker) so the
         # tracker stays a pure parser+threshold class with no I/O coupling.
-        mode, burn_downgrade_from = _downgrade_if_burning_fast(
-            usage_md.parent, tracker.session_pct, mode,
-        )
+        # Skipped when budget is unlimited — no reason to throttle.
+        burn_downgrade_from = None
+        if budget_mode != "disabled":
+            mode, burn_downgrade_from = _downgrade_if_burning_fast(
+                usage_md.parent, tracker.session_pct, mode,
+            )
 
-        # Verify the chosen mode is affordable; downgrade if not
-        mode = _downgrade_if_unaffordable(tracker, mode)
+            # Verify the chosen mode is affordable; downgrade if not
+            mode = _downgrade_if_unaffordable(tracker, mode)
 
         session_rem, weekly_rem = tracker.remaining_budget()
         available_pct = int(min(session_rem, weekly_rem))
@@ -1408,12 +1413,22 @@ def plan_iteration(
     # Step 1: Refresh usage
     _refresh_usage(usage_state, usage_md, count)
 
+    # Resolve budget_mode once — reused by Step 1b and Step 2.
+    try:
+        from app.usage_tracker import _get_budget_mode
+        _budget_mode = _get_budget_mode()
+    except (ImportError, OSError, ValueError) as exc:
+        _log_iteration("warn", f"budget_mode resolution failed, defaulting: {exc}")
+        _budget_mode = "session_only"
+
     # Step 1b: Warn the human when the rolling burn rate predicts a near-future
     # quota wipeout. Fires at most once per quota cycle.
-    _maybe_warn_burn_rate(instance, usage_state)
+    # Skipped when budget is disabled — no proactive quota warnings.
+    if _budget_mode != "disabled":
+        _maybe_warn_burn_rate(instance, usage_state)
 
     # Step 2: Get usage decision (mode, available%, reason, project idx)
-    decision = _get_usage_decision(usage_md, count, projects_str)
+    decision = _get_usage_decision(usage_md, count, projects_str, budget_mode=_budget_mode)
     autonomous_mode = decision["mode"]
     available_pct = decision["available_pct"]
     decision_reason = decision["reason"]
