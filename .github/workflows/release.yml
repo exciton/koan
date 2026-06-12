@@ -105,6 +105,7 @@ jobs:
             type=semver,pattern={{version}},value=${{ inputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
             type=raw,value=latest
+            type=raw,value=stable,enable=${{ inputs.update_stable }}
 
       - name: 🐳 Build and push Docker image
         uses: docker/build-push-action@v6
