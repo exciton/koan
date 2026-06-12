@@ -45,9 +45,11 @@ A mission that stagnates every run will be requeued indefinitely.
 
 ---
 
-#### B2 — Complex missions (`### ` format) in In Progress are never recovered
+#### B2 — Complex missions (`### ` format) in In Progress are never recovered ✅ FIXED
 
-**Files:** `koan/app/recover.py:244-256`
+**Branch:** `claude/fix-complex-mission-recovery`
+
+**Files:** `koan/app/recover.py`, `koan/tests/test_recover.py`
 
 **Problem:**
 `recover_missions()` scans In Progress line-by-line. Lines starting with `### ` 
@@ -55,45 +57,85 @@ set `in_complex_mission = True` and are kept in `remaining_in_progress` — they
 are never moved to Pending or Failed. On every restart, complex missions
 continue to accumulate in In Progress without recovery.
 
-Because `_flush_in_progress_to_done()` in `start_mission()` eventually marks
-any stale In Progress entries as Done (✅), a complex mission that timed out or
-crashed gets a false success marker.
+**Fix applied:**
+- Replaced the simple `in_complex_mission` flag with a `_finalize_complex_block()` helper
+- Entire block (header + sub-items) is collected and classified as a unit
+- Recoverable: entire block moves to Pending with `[r:N]` in the `### ` header
+- Unrecoverable: header line moves to Failed
+- Incomplete sub-items (no strikethrough) are picked as individual missions by `extract_next_pending()`
+- Also incorporates the B7 fix (single-use journal_available flag)
 
-**Fix:**
-Treat `### ` complex mission blocks the same as simple `- ` missions during
-recovery — extract the first `- ` line within the block as the recovery needle,
-move the whole block to Pending with incremented `[r:N]`.
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(recover): recover complex ### mission blocks from In Progress`
+
+**Body:**
+
+## Problem
+Multi-step missions using the `### Header
+- Step 1
+- Step 2` format were silently skipped by crash recovery. They stayed in In Progress indefinitely and were never re-queued.
+
+## Changes
+- Replaced simple `in_complex_mission` flag with `_finalize_complex_block()` inner function
+- Entire block (header line + sub-items) collected and classified together using the header as the mission key
+- Recoverable block: all lines moved to Pending with `[r:N]` in the `### ` header
+- Sub-items with strikethrough (completed steps) preserved; incomplete steps picked as normal missions
+- Also incorporates B7 fix: `has_pending_journal` consumed for first claiming mission only
+
+## Test
+70 tests pass. `test_skip_complex_mission` renamed to `test_recover_complex_mission_block` with updated assertions.
+</details>
 
 ---
 
-#### B3 — `create_pending_file()` overwrites checkpoint recovery context
+#### B3 — `create_pending_file()` overwrites checkpoint recovery context ✅ FIXED
 
-**Files:** `koan/app/loop_manager.py:187-230`, `koan/app/recover.py:371-405`
+**Branch:** `claude/fix-checkpoint-overwrite`
+
+**Files:** `koan/app/loop_manager.py`, `koan/tests/test_loop_manager.py`
 
 **Problem:**
 `recover.py._inject_checkpoint_context()` appends structured checkpoint context
-to `journal/pending.md` at startup. A few seconds later, when the recovered
-mission is actually picked and started, `create_pending_file()` calls
-`atomic_write(pending_path, content)` with a fresh header — completely
-overwriting the checkpoint context before Claude reads it.
+to `journal/pending.md` at startup. When the recovered mission is started,
+`create_pending_file()` overwrites pending.md with a fresh header, destroying
+the checkpoint context before Claude reads it.
 
-Result: missions classified as "partial" (has checkpoint) behave identically
-to "dead" (no checkpoint) in practice — the `partial` classification is
-currently a no-op.
+**Fix applied:**
+- Added `_RECOVERY_CONTEXT_SENTINEL = "## Recovery Context (from previous interrupted run)"`
+- Before writing, `create_pending_file()` checks for the sentinel in the existing pending.md
+- If found, appends the checkpoint section after the new header
+- Regular pending.md content (no sentinel) is not carried over
 
-**Fix:**
-Option A (minimal): In `create_pending_file()`, check for existing checkpoint
-context in the staging file and append it after the header.
+<details>
+<summary>PR description template</summary>
 
-Option B (clean): Remove `_inject_checkpoint_context()` from `recover.py`.
-Instead, pass the checkpoint data forward to `create_pending_file()` and have
-it incorporate checkpoint sections directly.
+**Title:** `fix(loop_manager): preserve checkpoint recovery context in create_pending_file`
+
+**Body:**
+
+## Problem
+`recover.py._inject_checkpoint_context()` writes structured recovery data to pending.md at startup. `create_pending_file()` called when the mission starts then overwrote it completely, making the "partial" state classification a no-op.
+
+## Changes
+- `create_pending_file()` reads existing pending.md before writing
+- If the recovery context sentinel is found, the checkpoint section is appended after the new header
+- Also wraps `journal_dir.mkdir()` in `contextlib.suppress(OSError)` (B14 fix)
+
+## Test
+Added `test_preserves_recovery_context_from_pending_md` and `test_does_not_preserve_regular_pending_md`.
+</details>
 
 ---
 
-#### B4 — Telegram `offset` is in-memory only; messages re-delivered after bridge restart
 
-**Files:** `koan/app/awake.py:833`, `koan/app/awake.py:857`
+
+#### B4 — Telegram `offset` is in-memory only; messages re-delivered after bridge restart ✅ FIXED
+
+**Branch:** `claude/fix-telegram-offset`
+
+**Files:** `koan/app/awake.py`
 
 **Problem:**
 `offset = None` is a local variable in `main()`. After bridge restart via
@@ -120,6 +162,31 @@ Next run: getUpdates(None) → gets 5,6,7 again → queued as duplicate missions
 Persist the last `offset` to disk atomically (e.g., `instance/.telegram-offset`)
 after each successful batch. On startup, read this file to resume from the
 correct offset.
+
+**Fix applied:**
+- Added `_load_offset()` / `_save_offset()` helpers using `instance/.telegram-offset.json`
+- `_save_offset(offset)` called after every `update_id` advance (atomic write)
+- `_load_offset()` called at bridge startup to resume from persisted offset
+- Tests: `_load_offset` mocked in `TestMainLoop` autouse fixture
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(awake): persist Telegram polling offset across bridge restarts`
+
+**Body:**
+
+## Problem
+Telegram `offset` was in-memory only. After bridge restart the offset reset to `None`, causing Telegram to re-deliver all updates from the ~60s window before the restart. This could cause duplicate mission queuing.
+
+## Changes
+- `_save_offset(offset)` persists to `instance/.telegram-offset.json` atomically on each `update_id` advance
+- `_load_offset()` reads the persisted value at startup
+- `TestMainLoop` autouse fixture mocks `_load_offset` to return `None` for isolation
+
+## Test
+267 tests pass. 1 pre-existing root-permission test excluded.
+</details>
 
 ---
 
@@ -200,9 +267,11 @@ only on genuine success, giving operators a single knob.
 
 ---
 
-#### B7 — `has_pending_journal` flag in `recover.py` applies to all in-progress missions
+#### B7 — `has_pending_journal` flag in `recover.py` applies to all in-progress missions ✅ FIXED
 
-**Files:** `koan/app/recover.py:203-208`, `koan/app/recover.py:270-273`
+**Branch:** `claude/fix-recover-pending-journal-scope` (also in `claude/fix-complex-mission-recovery`)
+
+**Files:** `koan/app/recover.py`, `koan/tests/test_recover.py`
 
 **Problem:**
 `has_pending_journal` is computed ONCE before the loop over all In Progress
@@ -213,11 +282,28 @@ exists — even if only one mission created it.
 "partial" missions get checkpoint context injected, which currently does nothing
 useful (B3), but the classification itself affects the audit log.
 
-**Fix:**
-Move the `pending.md` check inside the per-mission loop. For the first
-`classified as "partial"` mission, mark `journal_consumed = True` and set
-`has_pending_journal = False` for subsequent iterations so only the first
-mission claims the checkpoint.
+**Fix applied:**
+- `journal_available` flag replaces the per-call `has_pending_journal` inside the loop
+- Consumed (set to `False`) after the first mission claims "partial" state
+- Tested in `TestPendingJournalSingleUse::test_only_first_mission_gets_partial_state`
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(recover): consume pending.md context for first mission only`
+
+**Body:**
+
+## Problem
+`has_pending_journal` was computed once and applied to all in-progress missions. With multiple stale missions, all were classified as "partial" even though pending.md was written by exactly one interrupted run.
+
+## Changes
+- `journal_available` local flag initialized from `has_pending_journal`
+- Set to `False` after first "partial" classification, so subsequent missions are correctly classified as "dead"
+
+## Test
+Added `TestPendingJournalSingleUse` verifying second mission gets "dead" state.
+</details>
 
 ---
 
@@ -246,9 +332,11 @@ the in-memory set.
 
 ---
 
-#### B9 — `start_mission()` silently succeeds when mission not found in Pending
+#### B9 — `start_mission()` silently succeeds when mission not found in Pending ✅ FIXED
 
-**Files:** `koan/app/missions.py:1148-1151`
+**Branch:** `claude/fix-start-mission-return`
+
+**Files:** `koan/app/run.py`, `koan/app/mission_executor.py`
 
 **Problem:**
 If `_remove_pending_by_text()` returns `None` (mission text doesn't match
@@ -267,10 +355,30 @@ This can be triggered by missions with embedded double-spaces (fixed in
 not for other normalisation differences), or by edge cases in
 `_COMPLEXITY_TAG_RE` stripping.
 
-**Fix:**
-In `run.py`'s `_start_mission_in_file()`, verify the transition succeeded by
-reading the resulting content and checking that In Progress now contains the
-mission. If not, raise an exception or fall back to marking it as failed.
+**Fix applied:**
+- `_start_mission_in_file()` now returns `bool` (True = confirmed in In Progress)
+- After locked write, reads resulting content via `parse_sections()` to verify mission is in In Progress
+- Logs WARNING on mismatch
+- `mission_executor.py` aborts the run when transition is unconfirmed (returns `False`)
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(run): verify start_mission transition and abort on mismatch`
+
+**Body:**
+
+## Problem
+`_start_mission_in_file()` discarded the return value of `modify_missions_file()` and could not detect whether the mission actually moved to In Progress. Silent failure left the mission in Pending while Claude executed it.
+
+## Changes
+- `_start_mission_in_file()` returns `bool`
+- Reads In Progress section via `parse_sections()` after write to confirm transition
+- `mission_executor.py` aborts the run (returns `False`) when unconfirmed
+
+## Test
+749 tests pass.
+</details>
 
 ---
 
@@ -346,19 +454,35 @@ at each crash-recovery cycle, not just each timestamp cycle.
 
 ---
 
-#### B14 — `pending.md` journal dir created with wrong path when `instance_dir` ends with `/`
+#### B14 — `pending.md` journal dir creation failure aborts pending.md write ✅ FIXED
 
-**Files:** `koan/app/loop_manager.py:209`
+**Branch:** `claude/fix-checkpoint-overwrite` (B3 branch; B14 fix bundled in same commit)
 
-**Problem (low severity):** `Path(instance_dir) / "journal" / ...` is safe, but
-if the per-day journal directory creation fails (disk full, permission), the
-exception propagates and aborts the pending.md write, leaving no checkpoint
-context for Claude. There is no fallback to write `pending.md` without the
-date-stamped journal directory.
+**Files:** `koan/app/loop_manager.py`
 
-**Fix:** Wrap `journal_dir.mkdir()` in a try/except and continue even if the
-daily dir can't be created (write `pending.md` to `instance/journal/` root as
-fallback).
+**Problem (low severity):** If the per-day journal directory creation fails (disk full, permission denied), the exception propagated and aborted the pending.md write, leaving no checkpoint context for Claude.
+
+**Fix applied:**
+- `journal_dir.mkdir()` wrapped in `contextlib.suppress(OSError)`
+- On failure the dated subdir is skipped but `pending.md` is still written to `instance/journal/`
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(loop_manager): suppress OSError on dated journal subdir creation`
+
+**Body:**
+
+## Problem
+If `instance/journal/YYYY-MM-DD/` could not be created (disk full, permissions), pending.md was never written, losing checkpoint context for Claude.
+
+## Changes
+- `journal_dir.mkdir()` replaced with `contextlib.suppress(OSError): journal_dir.mkdir()`
+- pending.md write proceeds regardless
+
+## Note
+This fix is bundled in the `claude/fix-checkpoint-overwrite` (B3) branch commit.
+</details>
 
 ---
 
