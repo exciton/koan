@@ -1608,25 +1608,21 @@ def plan_iteration(
         if not exploration_projects:
             # Determine whether this is focus-gated, exploration-disabled, PR-limited, or branch-saturated
             if filter_result.focus_gated:
-                _log_iteration("koan", "All projects have focus enabled — waiting for queued missions")
                 wait_action = "exploration_wait"
                 wait_reason = "All projects have focus enabled — waiting for queued missions"
             elif filter_result.branch_saturated:
-                _log_iteration("koan", "All exploration projects branch-saturated — waiting for reviews")
                 wait_action = "branch_saturated_wait"
                 wait_reason = (
                     f"Branch limit reached for: {', '.join(filter_result.branch_saturated)} "
                     f"— waiting for reviews/merges"
                 )
             elif filter_result.pr_limited:
-                _log_iteration("koan", "All exploration projects at PR limit — waiting for reviews")
                 wait_action = "pr_limit_wait"
                 wait_reason = (
                     f"PR limit reached for: {', '.join(filter_result.pr_limited)} "
                     f"— waiting for reviews"
                 )
             else:
-                _log_iteration("koan", "All projects have exploration disabled — waiting for missions")
                 wait_action = "exploration_wait"
                 wait_reason = "All projects have exploration disabled — waiting for missions"
 
