@@ -207,7 +207,9 @@ def create_pending_file(
     """
     pending_path = Path(instance_dir) / "journal" / "pending.md"
     journal_dir = Path(instance_dir) / "journal" / datetime.now().strftime("%Y-%m-%d")
-    journal_dir.mkdir(parents=True, exist_ok=True)
+    import contextlib
+    with contextlib.suppress(OSError):
+        journal_dir.mkdir(parents=True, exist_ok=True)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
