@@ -12,7 +12,22 @@ and cross-referencing the state-flow analysis in `analysis-state-flow.md`.
 
 ---
 
-#### B1 — Stagnation retry counter resets after every requeue (infinite stagnation loop possible)
+#### B1 — Stagnation retry counter resets after every requeue (infinite stagnation loop possible) ✅ FIXED
+
+**Branch:** `claude/fix-stagnation-key`
+
+**PR description:**
+> **fix(stagnation): strip lifecycle markers from mission key before hashing**
+>
+> `_mission_key()` previously hashed the raw mission title including ⏳/▶ timestamps,
+> `[r:N]` recovery counters, and `[complexity:X]` tags. After `requeue_mission()` strips
+> those markers, the re-picked mission acquires new timestamps — producing a different hash
+> and silently resetting the stagnation retry counter on every cycle.
+> `max_retry_on_stagnation` was therefore never reached and a persistently-stagnating
+> mission would loop indefinitely.
+>
+> Now `_mission_key()` strips all lifecycle markers before hashing, making the key stable
+> across requeue cycles. Also fixes B13 (same root cause). Tests added.
 
 **Files:** `koan/app/stagnation_monitor.py:379-381`, `koan/app/run.py` `_finalize_mission`
 
@@ -27,23 +42,6 @@ for the new key is 0, so the `retry_count < max_retry` check always passes —
 `max_retry_on_stagnation` is never reached.
 
 A mission that stagnates every run will be requeued indefinitely.
-
-**Reproduction:**
-Configure a mission that loops forever. Observe that it stagates, requeues,
-stagantes again, requeues again, without limit.
-
-**Fix:**
-Strip timestamps (and `[r:N]` crash-recovery tags) from the title before hashing:
-
-```python
-def _mission_key(mission_title: str) -> str:
-    clean = strip_all_lifecycle_markers(mission_title)
-    clean = _RECOVERY_COUNTER_RE.sub("", clean).strip()
-    return hashlib.sha256(clean.encode("utf-8", errors="replace")).hexdigest()
-```
-
-Import `strip_all_lifecycle_markers` from `missions.py` and `_RECOVERY_COUNTER_RE`
-from `recover.py` (or re-implement inline).
 
 ---
 
@@ -313,7 +311,9 @@ than coupling it to the finalization path.
 
 ---
 
-#### B13 — Stagnation `[r:N]` key contamination: crash-recovered missions never hit stagnation cap
+#### B13 — Stagnation `[r:N]` key contamination: crash-recovered missions never hit stagnation cap ✅ FIXED
+
+**Branch:** `claude/fix-stagnation-key` (same fix as B1)
 
 **Files:** `koan/app/stagnation_monitor.py:379`
 
@@ -324,7 +324,7 @@ hashes. So not only do timestamps change the key (B1), but `[r:1]` produces a
 different key than `[r:2]`, meaning the stagnation retry history is abandoned
 at each crash-recovery cycle, not just each timestamp cycle.
 
-**Fix:** Same as B1 — strip `[r:N]` in `_mission_key()`.
+**Fix:** Same as B1 — `_STRIP_FOR_KEY_RE` now strips `[r:N]` tags.
 
 ---
 
