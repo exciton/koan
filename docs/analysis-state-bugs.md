@@ -127,9 +127,11 @@ correct offset.
 
 ---
 
-#### B5 — `_flush_in_progress_to_done()` marks abandoned missions as Done (✅) not Failed
+#### B5 — `_flush_in_progress_to_done()` marks abandoned missions as Done (✅) not Failed ✅ FIXED
 
-**Files:** `koan/app/missions.py:1091-1110`, `koan/app/missions.py:1139-1180`
+**Branch:** `claude/fix-flush-to-failed`
+
+**Files:** `koan/app/missions.py`, `koan/tests/test_missions.py`
 
 **Problem:**
 `start_mission()` calls `_flush_in_progress_to_done()` as a safety net before
@@ -145,15 +147,31 @@ startup, so this code path should not fire. But it does fire for:
 Marking a crashed/abandoned mission as Done creates false history — the user
 sees a ✅ for a mission that never actually completed.
 
-**Fix:**
-In `_move_in_progress_to_done()`, use ❌ with a `[flushed]` cause tag instead
-of ✅:
+**Fix applied:**
+- Renamed `_move_in_progress_to_done()` → `_flush_abandoned_in_progress()`
+- Changed marker from ✅ Done to ❌ Failed with `[flushed]` tag
+- Inserts into the Failed section (creates it if absent)
+- All related tests updated to assert on `sections["failed"]`
 
-```python
-entry = f"- {display} ❌ ({timestamp}) [flushed]"
-```
+<details>
+<summary>PR description template</summary>
 
-Rename the function to `_flush_in_progress_to_failed()` for clarity.
+**Title:** `fix(missions): redirect abandoned in-progress missions to Failed section`
+
+**Body:**
+
+## Problem
+When `start_mission()` finds stale In Progress missions (sanity enforcement), it was silently moving them to Done with a ✅ marker — creating false history that the work completed successfully. This fires when `recover.py` misses a mission (complex mission blocks, import errors).
+
+## Changes
+- Renamed `_move_in_progress_to_done()` → `_flush_abandoned_in_progress()` for clarity
+- Changed the marker to ❌ with a `[flushed]` tag inserted into the Failed section
+- Creates the Failed section if it doesn't already exist
+- Updated all test assertions to check `sections["failed"]` instead of `sections["done"]`
+
+## Test
+All 415 existing tests pass (1 pre-existing root-permission test excluded).
+</details>
 
 ---
 
