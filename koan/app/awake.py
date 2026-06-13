@@ -15,6 +15,7 @@ Module layout:
 - awake.py (this file) — main loop, chat, outbox, message classification
 """
 
+import contextlib
 import os
 import re
 import subprocess
@@ -66,8 +67,28 @@ from app.conversation_history import (
 )
 from app.signals import HEARTBEAT_FILE, PAUSE_FILE, STOP_FILE
 from app.utils import (
+    atomic_write_json,
     parse_project as _parse_project,
 )
+
+_OFFSET_FILE = INSTANCE_DIR / ".telegram-offset.json"
+
+
+def _load_offset() -> int | None:
+    """Load the last persisted Telegram polling offset, or None if absent."""
+    try:
+        import json
+        data = json.loads(_OFFSET_FILE.read_text())
+        v = data.get("offset")
+        return int(v) if v is not None else None
+    except (FileNotFoundError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def _save_offset(offset: int) -> None:
+    """Persist the Telegram polling offset to disk (best-effort)."""
+    with contextlib.suppress(OSError):
+        atomic_write_json(_OFFSET_FILE, {"offset": offset})
 
 
 # ---------------------------------------------------------------------------
@@ -886,7 +907,9 @@ def _bridge_loop():
             f"GitHub webhook receiver failed to start: {e}\n{traceback.format_exc()}")
 
     log("init", f"Polling every {POLL_INTERVAL}s (chat mode: fast reply)")
-    offset = None
+    offset = _load_offset()
+    if offset is not None:
+        log("init", f"Resuming Telegram polling from persisted offset {offset}")
     first_poll = True
 
     try:
@@ -911,6 +934,7 @@ def _bridge_loop():
                 # forever (see logs/awake.log KeyError: 'update_id').
                 if "update_id" in update:
                     offset = update["update_id"] + 1
+                    _save_offset(offset)
 
                 # Handle reaction updates
                 if "message_reaction" in update:
