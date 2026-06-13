@@ -385,7 +385,15 @@ class TestCreatePendingFile:
         instance = str(tmp_path / "instance")
         os.makedirs(os.path.join(instance, "journal"), exist_ok=True)
 
-        with patch("pathlib.Path.mkdir", side_effect=OSError("no space left on device")):
+        import re
+        original_mkdir = Path.mkdir
+
+        def failing_mkdir(self, *a, **kw):
+            if "journal" in str(self) and re.search(r"\d{4}-\d{2}-\d{2}", str(self)):
+                raise OSError("no space left on device")
+            return original_mkdir(self, *a, **kw)
+
+        with patch.object(Path, "mkdir", failing_mkdir):
             path = create_pending_file(
                 instance_dir=instance,
                 project_name="koan",

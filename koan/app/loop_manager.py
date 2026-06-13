@@ -249,8 +249,10 @@ Mode: {mode}
         if _RECOVERY_CONTEXT_SENTINEL in existing:
             recovery_start = existing.index(_RECOVERY_CONTEXT_SENTINEL)
             content = content.rstrip() + "\n\n" + existing[recovery_start:].strip() + "\n"
-    except (FileNotFoundError, OSError):
+    except FileNotFoundError:
         pass
+    except OSError as exc:
+        log.warning("Could not read existing pending.md for recovery context: %s", exc)
 
     atomic_write(pending_path, content)
     return str(pending_path)
