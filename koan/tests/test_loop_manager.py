@@ -376,6 +376,98 @@ class TestCreatePendingFile:
             assert str(args[0]).endswith("pending.md")
             assert "# Autonomous run" in args[1]
 
+    def test_pending_md_written_when_journal_dir_creation_fails(self, tmp_path):
+        """pending.md must be written even when journal_dir.mkdir() raises OSError."""
+        from unittest.mock import patch
+
+        from app.loop_manager import create_pending_file
+
+        instance = str(tmp_path / "instance")
+        os.makedirs(os.path.join(instance, "journal"), exist_ok=True)
+
+        import re
+        original_mkdir = Path.mkdir
+
+        def failing_mkdir(self, *a, **kw):
+            if "journal" in str(self) and re.search(r"\d{4}-\d{2}-\d{2}", str(self)):
+                raise OSError("no space left on device")
+            return original_mkdir(self, *a, **kw)
+
+        with patch.object(Path, "mkdir", failing_mkdir):
+            path = create_pending_file(
+                instance_dir=instance,
+                project_name="koan",
+                run_num=1,
+                max_runs=10,
+                autonomous_mode="implement",
+                mission_title="Test mission",
+            )
+
+        content = Path(path).read_text()
+        assert "# Mission: Test mission" in content
+
+    def test_preserves_recovery_context_from_pending_md(self, tmp_path):
+        """Checkpoint recovery context injected by recover.py must survive create_pending_file."""
+        from app.loop_manager import create_pending_file
+
+        instance = str(tmp_path / "instance")
+        journal_dir = Path(instance) / "journal"
+        journal_dir.mkdir(parents=True)
+
+        # Simulate what recover.py._inject_checkpoint_context() writes
+        recovery_ctx = (
+            "## Recovery Context (from previous interrupted run)\n\n"
+            "- **Branch**: `koan/my-fix`\n"
+            "- **Project**: my-project\n\n"
+            "### Steps already completed:\n"
+            "- Updated the config file\n"
+        )
+        (journal_dir / "pending.md").write_text(recovery_ctx)
+
+        path = create_pending_file(
+            instance_dir=instance,
+            project_name="my-project",
+            run_num=1,
+            max_runs=10,
+            autonomous_mode="implement",
+            mission_title="Fix the thing",
+        )
+
+        content = Path(path).read_text()
+        # New header should be present
+        assert "# Mission: Fix the thing" in content
+        # Recovery context must be preserved
+        assert "## Recovery Context (from previous interrupted run)" in content
+        assert "koan/my-fix" in content
+        assert "Updated the config file" in content
+
+    def test_does_not_preserve_regular_pending_md(self, tmp_path):
+        """Only checkpoint recovery context is preserved; regular pending.md content is not."""
+        from app.loop_manager import create_pending_file
+
+        instance = str(tmp_path / "instance")
+        journal_dir = Path(instance) / "journal"
+        journal_dir.mkdir(parents=True)
+
+        # Regular pending.md from a completed run (no recovery context sentinel)
+        (journal_dir / "pending.md").write_text(
+            "# Mission: Old task\nProject: old\nStarted: 2025-01-01\n---\n"
+        )
+
+        path = create_pending_file(
+            instance_dir=instance,
+            project_name="new-project",
+            run_num=1,
+            max_runs=10,
+            autonomous_mode="implement",
+            mission_title="New task",
+        )
+
+        content = Path(path).read_text()
+        assert "# Mission: New task" in content
+        # Old mission content should NOT be carried over
+        assert "Old task" not in content
+
 
 # --- Test interruptible_sleep ---
 
