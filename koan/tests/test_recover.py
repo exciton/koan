@@ -1014,3 +1014,91 @@ class TestCheckpointAwareRecovery:
         events = [json.loads(l) for l in log_path.read_text().splitlines() if l.strip()]
         assert len(events) >= 1
         assert events[0]["has_checkpoint"] is True
+
+
+class TestUnifiedRetryCap:
+    """Tests for B6 fix: max_total_retries combined cap across stagnation and crash-recovery."""
+
+    @pytest.fixture
+    def instance_dir(self, tmp_path):
+        (tmp_path / "journal").mkdir()
+        return tmp_path
+
+    def test_classify_unrecoverable_when_total_cap_hit(self):
+        """classify_mission_state returns unrecoverable when total_attempts >= max_total_retries."""
+        line = "- Fix the bug"
+        state = classify_mission_state(
+            line, total_attempts=5, max_total_retries=5,
+        )
+        assert state == "unrecoverable"
+
+    def test_classify_not_unrecoverable_when_total_under_cap(self):
+        """classify_mission_state does not escalate when total_attempts < max_total_retries."""
+        line = "- Fix the bug"
+        state = classify_mission_state(
+            line, total_attempts=4, max_total_retries=5,
+        )
+        assert state == "dead"
+
+    def test_classify_ignores_total_cap_when_zero(self):
+        """max_total_retries=0 disables the combined cap."""
+        line = "- Fix the bug"
+        state = classify_mission_state(
+            line, total_attempts=100, max_total_retries=0,
+        )
+        assert state in ("dead", "partial")
+
+    def test_r_counter_still_applies_independently(self):
+        """[r:N] >= MAX_RECOVERY_ATTEMPTS still escalates even if total cap not set."""
+        from app.recover import MAX_RECOVERY_ATTEMPTS
+        line = f"- Fix the bug [r:{MAX_RECOVERY_ATTEMPTS}]"
+        state = classify_mission_state(line, total_attempts=0, max_total_retries=0)
+        assert state == "unrecoverable"
+
+    def test_recover_increments_total_attempts(self, instance_dir):
+        """recover_missions() increments total_attempts in stagnation tracker on requeue."""
+        from app.stagnation_monitor import get_total_attempts
+
+        missions = instance_dir / "missions.md"
+        missions.write_text(_missions(in_progress="- Fix the database"))
+
+        recover_missions(str(instance_dir))
+
+        total = get_total_attempts(str(instance_dir), "Fix the database")
+        assert total == 1
+
+    def test_recover_escalates_when_total_cap_hit(self, instance_dir):
+        """When max_total_retries is reached, recover_missions escalates instead of requeueing."""
+        from app.stagnation_monitor import increment_total_attempts
+
+        mission = "Fix the database"
+        # Pre-seed 5 total attempts so the next recovery hits the cap of 5
+        for _ in range(5):
+            increment_total_attempts(str(instance_dir), mission)
+
+        missions = instance_dir / "missions.md"
+        missions.write_text(_missions(in_progress=f"- {mission}"))
+
+        with patch(
+            "app.config.get_stagnation_config",
+            return_value={"max_total_retries": 5},
+        ):
+            count, escalated = recover_missions(str(instance_dir))
+
+        assert count == 0
+        assert len(escalated) == 1
+
+    def test_total_attempts_accumulates_across_crash_and_stagnation(self, instance_dir):
+        """total_attempts increments each crash recovery; stagnation tracker persists between runs."""
+        from app.stagnation_monitor import get_total_attempts, increment_total_attempts
+
+        mission = "Compile the project"
+        # Simulate 2 crash recoveries (recover.py increments total_attempts per requeue)
+        increment_total_attempts(str(instance_dir), mission)
+        increment_total_attempts(str(instance_dir), mission)
+        assert get_total_attempts(str(instance_dir), mission) == 2
+
+        # Simulate 1 stagnation requeue (increment_retry_count also bumps total_attempts)
+        from app.stagnation_monitor import increment_retry_count
+        increment_retry_count(str(instance_dir), mission)
+        assert get_total_attempts(str(instance_dir), mission) == 3

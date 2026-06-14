@@ -1119,6 +1119,12 @@ def get_stagnation_config(project_name: str = "") -> dict:
             is re-queued before being marked Failed. ``0`` disables the
             retry loop entirely (mission is failed on the first stagnation).
             Default 3.
+        max_total_retries (int): ceiling on combined retry attempts across
+            both stagnation requeues and crash-recovery requeues for the same
+            logical mission. ``0`` disables the combined cap (independent
+            per-system limits still apply). Default 0 (disabled). When set,
+            provides a single operator knob to bound the total number of
+            automatic retry attempts regardless of which system triggered them.
 
     Per-project overrides via ``projects.yaml`` ``stagnation:`` take
     precedence. Setting ``enabled: false`` at project level disables the
@@ -1129,7 +1135,7 @@ def get_stagnation_config(project_name: str = "") -> dict:
         project_name: Optional project name for per-project overrides.
 
     Returns:
-        Dict with the resolved values — always contains all five keys.
+        Dict with the resolved values — always contains all six keys.
     """
     defaults = {
         "enabled": True,
@@ -1137,6 +1143,7 @@ def get_stagnation_config(project_name: str = "") -> dict:
         "abort_after_cycles": 3,
         "sample_lines": 50,
         "max_retry_on_stagnation": 3,
+        "max_total_retries": 0,
     }
     config = _load_config()
     base = config.get("stagnation", {})
@@ -1162,6 +1169,10 @@ def get_stagnation_config(project_name: str = "") -> dict:
     if max_retry < 0:
         max_retry = 0
 
+    max_total = _safe_int(merged.get("max_total_retries"), defaults["max_total_retries"])
+    if max_total < 0:
+        max_total = 0
+
     return {
         "enabled": bool(merged.get("enabled", defaults["enabled"])),
         "check_interval_seconds": max(
@@ -1170,6 +1181,7 @@ def get_stagnation_config(project_name: str = "") -> dict:
         "abort_after_cycles": abort_after,
         "sample_lines": max(1, _safe_int(merged.get("sample_lines"), defaults["sample_lines"])),
         "max_retry_on_stagnation": max_retry,
+        "max_total_retries": max_total,
     }
 
 

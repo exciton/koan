@@ -1893,6 +1893,7 @@ def _finalize_mission(instance: str, mission_title: str, project_name: str, exit
         from app.stagnation_monitor import (
             clear_retry_count,
             get_retry_count,
+            get_total_attempts,
             increment_retry_count,
         )
 
@@ -1901,8 +1902,11 @@ def _finalize_mission(instance: str, mission_title: str, project_name: str, exit
 
         cfg = get_stagnation_config(project_name)
         max_retry = int(cfg.get("max_retry_on_stagnation", 0))
+        max_total = int(cfg.get("max_total_retries", 0))
         already = get_retry_count(instance, mission_title)
-        if max_retry > 0 and already < max_retry:
+        total = get_total_attempts(instance, mission_title)
+        total_cap_hit = max_total > 0 and total >= max_total
+        if max_retry > 0 and already < max_retry and not total_cap_hit:
             new_count = increment_retry_count(
                 instance, mission_title,
                 pattern_type=pattern, pattern_excerpt=excerpt,
@@ -1924,16 +1928,19 @@ def _finalize_mission(instance: str, mission_title: str, project_name: str, exit
             return
 
         # Retry cap reached (or retries disabled): mark Failed with cause tag.
-        cause_tag = f"stagnation:{pattern}"
+        if total_cap_hit:
+            cause_tag = f"stagnation:{pattern}:total_cap"
+        else:
+            cause_tag = f"stagnation:{pattern}"
         clear_retry_count(instance, mission_title)
         _notify_stagnation(mission_title, project_name, pattern, excerpt)
     else:
-        # A non-stagnation outcome resets any prior retry counter so a
-        # mission that completes (or fails for a different reason) does
-        # not carry stale stagnation state into a later attempt.
+        # A non-stagnation outcome resets the stagnation-specific counter.
+        # total_attempts is preserved (clear_total=False) so the cross-system
+        # cap (max_total_retries) remains effective across crash-recovery cycles.
         try:
             from app.stagnation_monitor import clear_retry_count
-            clear_retry_count(instance, mission_title)
+            clear_retry_count(instance, mission_title, clear_total=(exit_code == 0))
         except Exception as e:
             log("error", f"Stagnation retry counter cleanup error: {e}")
 

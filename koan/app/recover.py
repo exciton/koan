@@ -76,6 +76,8 @@ def classify_mission_state(
     mission_line: str,
     has_pending_journal: bool = False,
     has_checkpoint: bool = False,
+    total_attempts: int = 0,
+    max_total_retries: int = 0,
 ) -> str:
     """Classify a stale in-progress mission's recovery state.
 
@@ -88,12 +90,18 @@ def classify_mission_state(
         mission_line: The raw mission text line.
         has_pending_journal: True if a pending.md exists from an interrupted run.
         has_checkpoint: True if a structured checkpoint file exists for this mission.
+        total_attempts: Combined retry count across stagnation and crash-recovery
+            (from stagnation_monitor tracker). Used with max_total_retries.
+        max_total_retries: When > 0, escalate to "unrecoverable" if total_attempts
+            reaches this ceiling regardless of [r:N] counter value.
 
     Returns:
         One of "unrecoverable", "partial", or "dead".
     """
     attempts = _get_recovery_attempts(mission_line)
     if attempts >= MAX_RECOVERY_ATTEMPTS:
+        return "unrecoverable"
+    if max_total_retries > 0 and total_attempts >= max_total_retries:
         return "unrecoverable"
     if has_checkpoint or has_pending_journal:
         return "partial"
@@ -215,6 +223,18 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
     except ImportError:
         _read_cp = None
 
+    # Load combined retry cap (max_total_retries) and stagnation tracker helpers.
+    # These are optional — if unavailable, the combined cap is simply not enforced.
+    try:
+        from app.config import get_stagnation_config as _get_stag_cfg
+        from app.stagnation_monitor import get_total_attempts as _get_total, increment_total_attempts as _inc_total
+        _stagnation_cfg = _get_stag_cfg()
+        _max_total_retries = int(_stagnation_cfg.get("max_total_retries", 0))
+    except Exception:
+        _get_total = None
+        _inc_total = None
+        _max_total_retries = 0
+
     recovered_count = 0
     escalated_missions: list = []
     recovered_mission_texts: list = []  # clean mission texts for checkpoint lookup
@@ -266,10 +286,13 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
                 cp = _read_cp(instance_dir, clean_title)
                 has_checkpoint = cp is not None
 
+            total = _get_total(instance_dir, clean_title) if _get_total else 0
             state = classify_mission_state(
                 header,
                 has_pending_journal=journal_available,
                 has_checkpoint=has_checkpoint,
+                total_attempts=total,
+                max_total_retries=_max_total_retries,
             )
             if journal_available and state == "partial":
                 journal_available = False
@@ -295,6 +318,8 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
                 dash_line = _set_recovery_attempts(f"- {clean_title}", attempts + 1)
                 recovered.append(dash_line)
                 recovered_mission_texts.append(clean_title)
+                if _inc_total is not None:
+                    _inc_total(instance_dir, clean_title)
                 _log_recovery_event(instance_dir, header, state, "recovered", attempts + 1,
                                     has_checkpoint=has_checkpoint)
 
@@ -332,10 +357,13 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
                     has_checkpoint = cp is not None
 
                 # Classify this mission; journal context is single-use
+                total = _get_total(instance_dir, clean_text) if _get_total else 0
                 state = classify_mission_state(
                     line,
                     has_pending_journal=journal_available,
                     has_checkpoint=has_checkpoint,
+                    total_attempts=total,
+                    max_total_retries=_max_total_retries,
                 )
                 # Once a mission claims the journal context, mark it consumed
                 if journal_available and state == "partial":
@@ -360,6 +388,8 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
                     updated_line = _set_recovery_attempts(line, attempts + 1)
                     recovered.append(updated_line)
                     recovered_mission_texts.append(clean_text)
+                    if _inc_total is not None:
+                        _inc_total(instance_dir, clean_text)
                     _log_recovery_event(instance_dir, line, state, "recovered", attempts + 1,
                                         has_checkpoint=has_checkpoint)
 

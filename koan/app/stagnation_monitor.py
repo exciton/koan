@@ -425,23 +425,46 @@ def get_retry_count(instance_dir: str, mission_title: str) -> int:
     return _extract_count(data.get(_mission_key(mission_title), 0))
 
 
+def get_total_attempts(instance_dir: str, mission_title: str) -> int:
+    """Return total retry attempts across stagnation and crash-recovery for *mission_title*.
+
+    Unlike get_retry_count() which tracks stagnation-only retries (reset on any
+    non-stagnation exit), total_attempts accumulates across both stagnation requeues
+    and crash-recovery requeues, and is only cleared on genuine mission success.
+    Used by the max_total_retries cap.
+    """
+    path = _retry_tracker_path(instance_dir)
+    data = locked_json_read(path, default={})
+    if not isinstance(data, dict):
+        return 0
+    raw = data.get(_mission_key(mission_title), {})
+    if isinstance(raw, dict):
+        try:
+            return max(0, int(raw.get("total_attempts", 0)))
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
 def get_retry_info(instance_dir: str, mission_title: str) -> dict:
     """Return full retry info for *mission_title* including pattern classification.
 
-    Returns a dict with keys ``count``, ``pattern_type``, ``sample_lines``.
+    Returns a dict with keys ``count``, ``pattern_type``, ``sample_lines``,
+    ``total_attempts``.
     """
     path = _retry_tracker_path(instance_dir)
     data = locked_json_read(path, default={})
     raw = data.get(_mission_key(mission_title), {}) if isinstance(data, dict) else {}
     if isinstance(raw, int):
-        return {"count": max(0, raw), "pattern_type": "", "sample_lines": ""}
+        return {"count": max(0, raw), "pattern_type": "", "sample_lines": "", "total_attempts": 0}
     if isinstance(raw, dict):
         return {
             "count": _extract_count(raw),
             "pattern_type": raw.get("pattern_type", ""),
             "sample_lines": raw.get("sample_lines", ""),
+            "total_attempts": max(0, int(raw.get("total_attempts", 0))),
         }
-    return {"count": 0, "pattern_type": "", "sample_lines": ""}
+    return {"count": 0, "pattern_type": "", "sample_lines": "", "total_attempts": 0}
 
 
 def increment_retry_count(
@@ -452,22 +475,26 @@ def increment_retry_count(
 ) -> int:
     """Increment and persist the stagnation retry counter for *mission_title*.
 
+    Also increments total_attempts (the combined cross-system cap counter).
     When *pattern_type* is provided, the tracker entry is upgraded to a dict
-    with ``count``, ``pattern_type``, and ``sample_lines`` fields.
+    with ``count``, ``pattern_type``, ``sample_lines``, and ``total_attempts``.
 
-    Returns the new count.
+    Returns the new stagnation count.
     """
     path = _retry_tracker_path(instance_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     key = _mission_key(mission_title)
 
     def _mutate(data: dict) -> int:
-        current = _extract_count(data.get(key, 0))
+        existing = data.get(key, {})
+        current = _extract_count(existing)
+        total = max(0, int(existing.get("total_attempts", 0))) if isinstance(existing, dict) else 0
         new_count = current + 1
         data[key] = {
             "count": new_count,
             "pattern_type": pattern_type,
             "sample_lines": pattern_excerpt[:500],
+            "total_attempts": total + 1,
         }
         return new_count
 
@@ -479,14 +506,61 @@ def increment_retry_count(
         return 1
 
 
-def clear_retry_count(instance_dir: str, mission_title: str) -> None:
-    """Drop the retry counter for *mission_title* (e.g. on completion)."""
+def increment_total_attempts(instance_dir: str, mission_title: str) -> int:
+    """Increment the total_attempts counter without touching the stagnation count.
+
+    Called by crash-recovery (recover.py) when a mission is requeued after a
+    crash, so that the max_total_retries cap accounts for both stagnation and
+    crash-recovery retry cycles.
+
+    Returns the new total_attempts value.
+    """
+    path = _retry_tracker_path(instance_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = _mission_key(mission_title)
+
+    def _mutate(data: dict) -> int:
+        existing = data.get(key, {})
+        total = max(0, int(existing.get("total_attempts", 0))) if isinstance(existing, dict) else 0
+        new_total = total + 1
+        if isinstance(existing, dict):
+            data[key] = {**existing, "total_attempts": new_total}
+        else:
+            data[key] = {"count": _extract_count(existing), "total_attempts": new_total}
+        return new_total
+
+    try:
+        return locked_json_modify(path, _mutate, default_factory=dict, validator=_validate_tracker)
+    except OSError as e:
+        print(f"[stagnation_monitor] total_attempts save error: {e}", file=sys.stderr)
+        return 1
+
+
+def clear_retry_count(instance_dir: str, mission_title: str, *, clear_total: bool = True) -> None:
+    """Drop the stagnation retry counter for *mission_title*.
+
+    Args:
+        clear_total: When True (default), also resets total_attempts — use on
+            genuine mission success. When False, preserves total_attempts across
+            crash-recovery cycles so the cross-system cap remains effective.
+    """
     path = _retry_tracker_path(instance_dir)
     if not path.exists():
         return
     key = _mission_key(mission_title)
 
     def _mutate(data: dict) -> None:
-        data.pop(key, None)
+        if clear_total:
+            data.pop(key, None)
+        else:
+            existing = data.get(key, {})
+            if not isinstance(existing, dict):
+                data.pop(key, None)
+                return
+            total = existing.get("total_attempts", 0)
+            if total:
+                data[key] = {"total_attempts": total}
+            else:
+                data.pop(key, None)
 
     locked_json_modify(path, _mutate, default_factory=dict, validator=_validate_tracker)
