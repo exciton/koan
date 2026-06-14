@@ -2,7 +2,15 @@
 
 Analysis based on reading: `missions.py`, `recover.py`, `mission_executor.py`,
 `stagnation_monitor.py`, `outbox_manager.py`, `awake.py`, `loop_manager.py`,
+`run.py`, `iteration_manager.py`, `signals.py`, `estop_manager.py`,
+`checkpoint_manager.py`, `startup_manager.py`,
 and cross-referencing the state-flow analysis in `analysis-state-flow.md`.
+
+**Fix status summary (as of this branch):**
+- ✅ Fixed (9 bugs): B1, B2, B3, B4, B5, B7, B9, B13, B14
+- Unfixed bugs: B6 (partially mitigated), B8, B10, B11, B12
+- Documentation gaps outstanding: D1, D2, D4, D5, D7, D8, D9, D10, D11, D12
+- Documentation gaps resolved: D3, D6
 
 ---
 
@@ -251,16 +259,19 @@ There are two separate retry counters:
 - `[r:N]` embedded in missions.md: tracks crash-recovery attempts, max 3
 - `.stagnation-retries.json`: tracks stagnation-requeue attempts, max configurable
 
-These counters are independent and have no cross-awareness. A mission can:
-1. Stagnate 2 times (requeued via stagnation counter, never reaching max due to B1)
-2. Then crash-recover 3 times (via `[r:N]` counter)
-3. Then stagnate again (new run, new stagnation key) — infinite loop
+These counters are independent and have no cross-awareness. With B1 fixed,
+the stagnation cap now works correctly within a single run session. But a
+mission can still:
+1. Hit the stagnation cap → moved to Failed
+2. Operator re-queues it → fresh stagnation key (count resets)
+3. Hit crash-recovery cycles → `[r:N]` reaches 3 → escalated to Failed
+4. Operator re-queues → cycle restarts
 
-Neither counter is reset when the other fires. There is no global "give up on
-this mission" threshold.
+B1 fix bounds infinite stagnation loops within a session. The cross-system
+combined limit (stagnation retries + crash-recovery retries) is still undefined
+and not surfaced to operators.
 
-**Fix (short term):** Fix B1 first — this automatically makes the stagnation
-cap work as intended and bounds the combined retry total.
+**Status:** Partially mitigated by B1 fix. No global "give up" threshold exists.
 
 **Fix (long term):** Consider a unified "total_attempts" counter that resets
 only on genuine success, giving operators a single knob.
@@ -388,7 +399,7 @@ not for other normalisation differences), or by edge cases in
 
 #### B10 — `requeue_mission()` inserts at top of Pending queue (undocumented priority behavior)
 
-**Files:** `koan/app/missions.py:1254-1261`
+**Files:** `koan/app/missions.py` (`requeue_mission`)
 
 **Problem:**
 `requeue_mission()` inserts the re-queued mission at the TOP of the Pending
@@ -397,8 +408,9 @@ section (first item after the header). `insert_mission()` inserts at the BOTTOM
 ahead of all other pending work.
 
 This is intentional (you want the interrupted work to resume immediately) but
-is not documented and surprises operators who see queue ordering change
-unexpectedly after a quota pause.
+the current docstring does not mention the priority insertion. Operators who
+see queue ordering change unexpectedly after a quota pause have no in-code
+hint about why.
 
 **Fix:** Add a docstring note to `requeue_mission()` explaining the
 top-of-queue insertion and why it is intentional.
@@ -407,13 +419,18 @@ top-of-queue insertion and why it is intentional.
 
 #### B11 — No telemetry when `complete_mission()` / `fail_mission()` silently finds nothing
 
-**Files:** `koan/app/missions.py:1054-1058`
+**Files:** `koan/app/missions.py` (`_move_pending_to_section`)
 
 **Problem:**
 `_move_pending_to_section()` returns the content unchanged if the mission is
 not found in Pending or In Progress. The caller never knows whether the
 transition happened. Silent no-ops here mask data corruption or race
-conditions.
+conditions (e.g., a mission that was double-finalized, or one whose text
+changed between pick and finalize).
+
+**Note:** B9 fixed the analogous gap in `start_mission()` — that now returns
+a `bool` and `mission_executor` aborts on mismatch. The symmetric fix for
+`complete_mission()`/`fail_mission()` is still absent.
 
 **Fix:**
 Add a boolean return value (`True` if transition occurred, `False` if not found)
@@ -572,43 +589,44 @@ the startup flow and rely solely on the read inside `_recover_transform()`.
 
 ### D1 — `start_mission()` docstring omits the sanity-flush side effect
 
-**File:** `koan/app/missions.py:1139`
+**File:** `koan/app/missions.py` (`start_mission`)
 
 Current docstring: "Move a mission from Pending to In Progress with a started
 timestamp."
 
-Missing: "As a side effect, any existing In Progress missions are silently moved
-to Done via `_flush_in_progress_to_done()`. Under normal operation this path
-never fires because `recover.py` runs at startup. If it does fire, the In
-Progress mission will appear as Done even if it never completed successfully."
+Missing: "As a side effect, any existing In Progress missions are moved to
+Failed via `_flush_abandoned_in_progress()` (with a [flushed] tag). Under
+normal operation this path never fires because `recover.py` runs at startup.
+If it does fire, the abandoned mission will appear in Failed rather than Done."
+
+(B5 fixed the behavior — it now writes Failed, not Done — but the docstring
+still does not document this side effect at all.)
 
 ---
 
-### D2 — `_flush_in_progress_to_done()` is undocumented as a safety net distinct from `recover.py`
+### D2 — `_flush_abandoned_in_progress()` is undocumented as a safety net distinct from `recover.py`
 
-**File:** `koan/app/missions.py:1091`
+**File:** `koan/app/missions.py` (`_flush_in_progress_to_failed`, `_flush_abandoned_in_progress`)
 
 The existing comment says "Sanity enforcement: only one mission should be in
 progress at a time." It does not explain:
 - That this is a second line of defence after `recover.py`
 - When each fires (startup vs mission-start time)
-- That it marks missions Done rather than Failed (a deliberate choice that
-  should be documented, or corrected — see B5)
+- That B5 changed the marker from Done to Failed — the comment still references
+  the old behavior and does not document why Failed is correct here
 
 ---
 
-### D3 — Stagnation retry counter semantics undocumented (per-run vs per-mission)
+### D3 — Stagnation retry counter semantics — now accurate after B1 fix ✅ RESOLVED
 
-**File:** `koan/app/stagnation_monitor.py:363-380`
+**File:** `koan/app/stagnation_monitor.py` (`_mission_key`, `_STRIP_FOR_KEY_RE`)
 
-The module-level comment block above the retry-tracking functions says "counters
-are keyed by a stable SHA-256 of the mission title". This implies cross-run
-stability, but the title includes timestamps, making the key effectively
-per-run (see B1). The word "stable" is misleading.
+B1 fixed the key: `_STRIP_FOR_KEY_RE` now strips timestamps, `[r:N]` tags, and
+`[complexity:X]` tags before hashing. The key IS now stable across requeue cycles
+as described.
 
-**Fix:** Update the comment to be explicit: "keyed by SHA-256 of the mission
-title TEXT including timestamps — effectively per-execution, not per-mission."
-Then either fix B1 or document this as a known limitation.
+The comment "keyed by a stable SHA-256 of the mission title" is now accurate.
+No further action needed here.
 
 ---
 
@@ -636,33 +654,31 @@ dispatch to prevent false-positive quota detection."
 
 ---
 
-### D6 — Complex missions (`### ` format) in missions.md are undocumented as unsupported by recovery
+### D6 — Complex missions (`### ` format) recovery is now fixed ✅ RESOLVED
 
-**File:** `koan/app/recover.py`, `koan/app/missions.py`
+**File:** `koan/app/recover.py`
 
-The `### project:X` sub-header format inside the Pending section is documented
-in `docs/users/user-manual.md`. But there is no documentation that complex
-missions using the `### ` format within In Progress are skipped by crash
-recovery (see B2). Operators who use the `### ` format for multi-step missions
-should know they could get permanently stuck in In Progress after a crash.
+B2 fixed the recovery behavior: `_finalize_complex_block()` now recovers entire
+`### Header + sub-items` blocks as a unit. The gap (complex missions stuck in
+In Progress forever) no longer exists. Documentation update is moot.
 
 ---
 
-### D7 — CLAUDE.md lists `mission_executor.py` as new but `run.py` still contains many cycle functions
+### D7 — run.py / mission_executor.py boundary is undocumented in CLAUDE.md
 
 **File:** `CLAUDE.md` Architecture section
 
-CLAUDE.md says "**`run.py`** (agent loop): Pure-Python main loop with restart
-wrapper. Picks pending missions, transitions them through lifecycle, executes
-via Claude Code CLI or direct skill dispatch." and separately lists
-`mission_executor.py`. But `run.py` still contains `run_claude_task()`,
-`_finalize_mission()`, `_classify_and_handle_cli_error()`,
-`_probe_exit0_quota()` and other core execution functions. The boundary between
-`run.py` and `mission_executor.py` is not clearly documented.
+The current boundary (as of this branch):
+- **`mission_executor.py`**: `_run_iteration()` (per-iteration entry point), `_handle_skill_dispatch()`, `_maybe_retry_mission()`, `_get_git_head()`. Calls into `run.py` functions for subprocess execution and finalization.
+- **`run.py`**: `run_claude_task()`, `_finalize_mission()`, `_classify_and_handle_cli_error()`, `_probe_exit0_quota()`, `_start_mission_in_file()`, `_update_mission_in_file()`, `_requeue_mission_in_file()`. Also: `main_loop()`, signal handling, `SignalState`, `set_status()`.
 
-**Fix:** Update CLAUDE.md to describe which execution responsibilities remain
-in `run.py` vs which are in `mission_executor.py`, and what the intended
-long-term boundary is.
+CLAUDE.md does not describe this split. A developer adding a new execution feature
+has no guidance on which file to put it in.
+
+**Fix:** Update CLAUDE.md to document the boundary: `mission_executor.py` owns
+the per-iteration orchestration (dedup, git prep, skill routing, retry logic);
+`run.py` owns the subprocess execution primitives, mission file transitions, and
+the main loop scaffolding.
 
 ---
 
@@ -704,3 +720,35 @@ CLAUDE.md for developer on-boarding.
 **Fix:** Add a compact Mermaid state diagram or ASCII art to the Architecture
 section showing the mission lifecycle and the key state transitions (including
 crash recovery and requeue paths).
+
+---
+
+### D11 — `estop_manager.py` is infrastructure-only; not wired into the main loop
+
+**File:** `koan/app/estop_manager.py`, `koan/app/iteration_manager.py`
+
+`estop_manager` provides `.koan-estop` / `.koan-estop-state` files for emergency
+stop and per-project freezing, but `run.py` and `mission_executor.py` do not
+call `is_estopped()` or `is_project_frozen()`. The module is only used in its
+own test file. The agent will not respect an e-stop without an additional
+integration step.
+
+**Fix:** Wire `is_estopped(koan_root)` into `main_loop()` (top-of-iteration
+signal check) and `is_project_frozen(koan_root, project_name)` into
+`_run_iteration()` before git prep. Until then, the module is dead code in
+production.
+
+---
+
+### D12 — `signals.py` constants not yet used everywhere; some callers hardcode file names
+
+**File:** `koan/app/signals.py` and various callers
+
+`signals.py` centralizes all `.koan-*` file name constants, but not all callers
+import from it. Some modules still hardcode the file names inline
+(e.g., `.koan-check-notifications` in `run.py:721`, `.koan-restart-bridge` and
+`.koan-restart-run` in `restart_manager.py` as local constants rather than
+imports from `signals.py`).
+
+**Fix:** Migrate remaining hardcoded strings to import from `signals.py`. Low
+priority but makes future renames one-file operations.

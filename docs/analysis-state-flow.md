@@ -8,7 +8,7 @@ A comprehensive map of every code path from input to output, documenting every s
 
 ### 1.1 In-Memory State (process-local, lost on crash)
 
-**run.py / mission_executor.py:**
+**run.py:**
 | Variable | Type | Location | Purpose |
 |----------|------|----------|---------|
 | `_last_mission_timed_out` | `bool` | `run.py` module | Set by `ProcessWatchdog`; read by `run_claude_task` to set exit_code=1 |
@@ -22,6 +22,10 @@ A comprehensive map of every code path from input to output, documenting every s
 | `consecutive_errors` | `int` | `main_loop()` | Consecutive iteration failures; triggers pause at `max_consecutive_errors` |
 | `consecutive_idle` | `int` | `main_loop()` | Consecutive idle iterations; triggers auto-pause at `MAX_CONSECUTIVE_IDLE` (30) |
 | `_warned_missing_projects` | `set` | `run.py` module | One-time warning suppression for missing project paths |
+
+**mission_executor.py (called from main_loop via _run_iteration):**
+
+`mission_executor._run_iteration()` is the per-iteration execution entry point. It owns the dedup guard, git prep, `_start_mission_in_file`, skill dispatch routing, Claude subprocess invocation (via `run.run_claude_task`), retry logic (`_maybe_retry_mission`), and the post-mission pipeline call. It holds no persistent module-level state — all mutations go through shared signal files or `run.py` module-level variables.
 
 **awake.py:**
 | Variable | Type | Purpose |
@@ -48,23 +52,73 @@ A comprehensive map of every code path from input to output, documenting every s
 
 ### 1.3 Signal / Flag Files (in `$KOAN_ROOT/`)
 
+All signal file name constants live in `koan/app/signals.py` — a centralized registry. Import from there rather than hardcoding names.
+
+**Process lifecycle:**
+
 | File | Written by | Read/consumed by | Semantics |
 |------|-----------|-----------------|-----------|
-| `.koan-pause` (+ `.koan-pause-reason`) | `pause_manager.create_pause()`, quota handler, error handler | `run.py` top of every iteration | Pause execution. 3-line format: reason/reset_ts/display |
+| `.koan-pause` | `pause_manager.create_pause()`, quota handler, error handler | `run.py` top of every iteration | Pause execution. 3-line format: reason/reset_ts/display |
 | `.koan-stop` | `make stop`, awake.py `/stop` | `run.py` top of iteration (consumed) | One-shot stop of agent loop |
 | `.koan-shutdown` | awake.py `/shutdown` | run.py AND awake.py (consumed by run.py) | Stop both processes |
 | `.koan-restart-bridge` | `restart_manager.request_restart()` | awake.py (consumed) | Bridge restarts via `os.execv()` |
 | `.koan-restart-run` | `restart_manager.request_restart()` | run.py (consumed) | Run loop restarts via `sys.exit(42)` + `os.execv()` |
-| `.koan-restart` | `restart_manager.request_restart()` | (legacy) | Legacy combined restart signal |
-| `.koan-focus` | `focus_manager.create_focus()` (awake.py `/focus`) | `iteration_manager._check_focus()` | Focus mode: no contemplation, mode capped at implement. JSON format |
-| `.koan-passive` | `passive_manager.create_passive()` (awake.py `/passive`) | `iteration_manager._check_passive()` | Passive mode: no execution. JSON format |
-| `.koan-status` | `run.py set_status()` (written every state change) | awake.py (`/status`), dashboard | Human-readable current loop status |
-| `.koan-project` | `run.py` startup + project rotation | `run.py _read_current_project()` | Currently-active project name |
+| `.koan-restart` | `restart_manager.request_restart()` | (legacy, written for compat) | Legacy combined restart signal; no active consumer |
 | `.koan-cycle` | awake.py `/update` command | run.py top of iteration (consumed) | Trigger update after current mission completes |
 | `.koan-abort` | awake.py `/abort`, SIGUSR1 handler | run.py poll loop inside `run_claude_task` | Kill current Claude subprocess |
 | `.koan-reset-counter` | awake.py `/reset` | run.py top of iteration (consumed) | Reset `count` to 0 |
+
+**Pause / quota:**
+
+| File | Written by | Read/consumed by | Semantics |
+|------|-----------|-----------------|-----------|
+| `.koan-quota-reset` | legacy quota path | `command_handlers` (legacy fallback read) | Superseded by `.koan-pause` with reason="quota"; kept for backward compat |
+| `.koan-skip-start-pause` | awake.py `/resume` auto-restart path | `startup_manager.handle_start_on_pause()` | Skip the 30s startup pause; consumed at startup |
+
+**Mode flags:**
+
+| File | Written by | Read/consumed by | Semantics |
+|------|-----------|-----------------|-----------|
+| `.koan-focus` | `focus_manager.create_focus()` (awake.py `/focus`) | `iteration_manager._check_focus()` | Focus mode: no contemplation, mode capped at implement. JSON format |
+| `.koan-passive` | `passive_manager.create_passive()` (awake.py `/passive`) | `iteration_manager._check_passive()` | Passive mode: no execution. JSON format |
+| `.koan-verbose` | awake.py `/verbose` | `prompt_builder` | Enables verbose mode section in agent system prompt |
+
+**Status / heartbeat:**
+
+| File | Written by | Read/consumed by | Semantics |
+|------|-----------|-----------------|-----------|
+| `.koan-status` | `run.py set_status()` (written every state change) | awake.py (`/status`), dashboard, `agent_state.get_agent_state()` | Human-readable current loop status |
+| `.koan-project` | `run.py` startup + project rotation | `run.py _read_current_project()`, `agent_state` | Currently-active project name |
+| `.koan-heartbeat` | bridge (awake.py) | health checker | Bridge liveness signal |
+| `.koan-run-heartbeat` | run.py | health checker | Runner liveness signal |
+| `.koan-daily-report` | `daily_report` module | startup, scheduler | Trigger / record daily report generation |
+| `.koan-debug.log` | debug module | operator | Debug output log |
+
+**Notification signals:**
+
+| File | Written by | Read/consumed by | Semantics |
+|------|-----------|-----------------|-----------|
 | `.koan-check-notifications` | `github_webhook.py` | `loop_manager._consume_check_notifications_signal()` | Force immediate GitHub notification poll |
-| `run.pid` / `awake.pid` etc. | `pid_manager.acquire_pidfile()` | `pid_manager.check_pidfile()` | Exclusive flock-based process instance locks |
+
+**Misc:**
+
+| File | Written by | Read/consumed by | Semantics |
+|------|-----------|-----------------|-----------|
+| `.koan-onboarding.json` | onboarding module | onboarding module | Onboarding state tracking |
+| `.koan-last-cleanup` | startup_manager cleanup | startup_manager | Throttle marker for per-startup cleanup (24h default) |
+
+**Process instance locks** (named `.koan-pid-<name>` via `signals.pid_file()`):
+
+| File | Written by | Read/consumed by | Semantics |
+|------|-----------|-----------------|-----------|
+| `.koan-pid-run` / `.koan-pid-awake` / etc. | `pid_manager.acquire_pidfile()` | `pid_manager.check_pidfile()` | Exclusive flock-based process instance locks |
+
+**E-stop state** (not yet wired into the main loop; exists as infrastructure):
+
+| File | Written by | Read/consumed by | Semantics |
+|------|-----------|-----------------|-----------|
+| `.koan-estop` | `estop_manager.activate_estop()` | (not yet consumed by run.py/mission_executor) | Emergency stop gate signal (existence = stopped) |
+| `.koan-estop-state` | `estop_manager.activate_estop()` | `estop_manager.get_estop_state()` | Rich JSON e-stop state: level (full vs project_freeze), frozen project list, reason |
 
 ### 1.4 JSON State Files (in `instance/`)
 
@@ -73,16 +127,18 @@ A comprehensive map of every code path from input to output, documenting every s
 | `.burn-rate.json` | Rolling 20-sample burn-rate buffer with `last_warned_at` | `burn_rate.record_run()` | Yes (fcntl.flock LOCK_EX) |
 | `.ci-dispatch-tracker.json` | CI fix mission dedup keyed by `pr:sha:job:run_id` | `ci_dispatch` | Yes |
 | `.review-dispatch-tracker.json` | PR review comment fingerprint dedup, per-project cooldown | `review_comment_dispatch` | Yes |
-| `.stagnation-retries.json` | Per-mission stagnation retry counter, keyed by SHA-256(title) | `stagnation_monitor` | Yes (locked JSON modify) |
+| `.stagnation-retries.json` | Per-mission stagnation retry counter, keyed by SHA-256 of stripped mission title | `stagnation_monitor` | Yes (locked JSON modify) |
 | `.branch-cleanup-tracker.json` | Per-project branch cleanup cooldown (default 24h) | `git_sync` | Yes |
 | `.commit-tracker.json` | Koan's own HEAD SHA across restarts (for startup diff) | `auto_update` | Yes |
 | `.head-tracker.json` | Remote HEAD branch change detection, 12h throttle | `head_tracker` | Yes |
 | `.api-missions.json` | REST API mission sidecar index | `api/mission_index.py` | Yes (`atomic_write_json`) |
 | `.diagnostic-cooldowns.json` | Per-project autonomous health diagnostic cooldown | `iteration_manager` | Yes |
 | `.selection-audit.json` | Thompson Sampling project-selection ring buffer | `iteration_manager` | Yes |
+| `.telegram-offset.json` | Persisted Telegram poll offset; survives bridge restarts | `awake._save_offset()` | Yes |
 | `usage_state.json` | Token accumulator for usage estimation | `usage_estimator` | Yes |
 | `session_outcomes.json` | Per-project session outcome history | `session_tracker` | Varies |
 | `recovery.jsonl` | Recovery event audit log | `recover.py` | Locked append (`locked_jsonl_append`) |
+| `journal/checkpoints/<hash>.json` | Structured mission progress checkpoint: branch, steps_done/remaining, timestamps. Created when mission starts, updated from `CHECKPOINT:` stdout markers and pending.md, deleted on clean completion. Used by `recover.py` to inject structured recovery context. | `checkpoint_manager` | Yes (`atomic_write`) |
 
 ### 1.5 Git / GitHub External State
 
@@ -400,7 +456,15 @@ Step 6: _start_mission_in_file() — CRITICAL ATOMIC TRANSITION
 
 Step 7: create_pending_file() — inject context before Claude runs
   State change: instance/journal/pending.md CREATED with mission context,
-              focus area, memory summary, and prior checkpoint if any
+              focus area, memory summary, and prior checkpoint if any.
+              If a recovery context sentinel is present in the existing
+              pending.md (written by recover.py._inject_checkpoint_context),
+              that section is PRESERVED in the new file.
+
+Step 7b: checkpoint_manager.create_checkpoint() — structured checkpoint created
+  State change: instance/journal/checkpoints/<hash>.json CREATED with
+              mission text, project name, run_num, started_at timestamp.
+              (hash = first 12 chars of SHA-256 of stripped mission text)
 
 Step 8: devcontainer.ensure_container_up() (if project has devcontainer: true)
   State change: Docker container started; git credentials configured in container
@@ -421,6 +485,10 @@ Step 11: Claude CLI agent executes
               instance/journal/pending.md UPDATED by Claude as it works
               instance/memory/ potentially UPDATED
               Git commits possibly made by Claude in project repo
+              instance/journal/checkpoints/<hash>.json UPDATED periodically:
+                - branch name recorded after first commit
+                - steps_done/remaining parsed from `CHECKPOINT: {...}` stdout lines
+                - pending.md content synced to checkpoint (`update_from_pending`)
 
 Step 12: Claude CLI exits (exit_code returned)
   State change: _sig.claude_proc = None
@@ -434,26 +502,28 @@ Step 13: _probe_exit0_quota() — scan for quota signals even on exit_code=0
               _requeue_mission_in_file() -> missions.md[In Progress] -> missions.md[Pending]
 
 Step 14: run_post_mission() — full post-mission pipeline
-  a. update_usage() — parse token costs from stdout, update usage_state.json + usage.md
+  a. checkpoint_manager.delete_checkpoint() — structured checkpoint removed on clean completion
+     State change: instance/journal/checkpoints/<hash>.json DELETED (on exit_code=0)
+  b. update_usage() — parse token costs from stdout, update usage_state.json + usage.md
      State change: instance/usage_state.json UPDATED (token accumulators)
                  instance/usage.md UPDATED (percentage display)
-  b. quota detection from stdout/stderr
+  c. quota detection from stdout/stderr
      State change: if detected: .koan-pause WRITTEN; mission requeued
-  c. archive_pending() — move pending.md checkpoint to archive
+  d. archive_pending() — move pending.md checkpoint to archive
      State change: instance/journal/pending.md REMOVED or archived
-  d. Verification, lint gate, quality gate, reflection
+  e. Verification, lint gate, quality gate, reflection
      State change: Claude may make additional commits in project repo
                  Journal entries written
-  e. security_review.differential_review()
+  f. security_review.differential_review()
      State change: Security audit log UPDATED
-  f. check_auto_merge() -> auto-merge if conditions met
+  g. check_auto_merge() -> auto-merge if conditions met
      State change: GitHub PR MERGED + CLOSED (if auto-merge config matches)
                  Remote branch DELETED
                  Local branch DELETED
                  Journal entry written
-  g. hooks.fire_hook("post_mission")
+  h. hooks.fire_hook("post_mission")
      State change: User hook handlers run (side effects vary)
-  h. maybe_queue_autoreview()
+  i. maybe_queue_autoreview()
      State change: possibly missions.md[Pending] += "/review PR_URL" entry
 
 Step 15: _finalize_mission() — CRITICAL ATOMIC TRANSITION
@@ -625,11 +695,14 @@ Step 2: run_startup() -> startup_manager.run_startup()
 
 Step 3: recover.recover_missions() called:
   a. Reads missions.md — scans In Progress section
-  b. check_pending_journal() — checks journal/pending.md non-empty
-  c. For each in-progress "- " line:
+  b. Checks journal/pending.md non-empty (has_pending_journal)
+  c. For each "- " mission line (and `### ` complex-mission blocks as units):
      - Count [r:N] recovery counter (0 if absent)
-     - Try to read checkpoint via checkpoint_manager.read_checkpoint()
-     - Classify: unrecoverable (r >= 3), partial (has checkpoint/pending.md), dead (otherwise)
+     - Try to read structured checkpoint via checkpoint_manager.read_checkpoint()
+       (looks up instance/journal/checkpoints/<hash>.json)
+     - Classify: unrecoverable (r >= 3), partial (has checkpoint OR pending.md, first only),
+       dead (neither). `has_pending_journal` is consumed (set to False) after the first
+       "partial" classification so subsequent missions are classified as "dead".
 
 Step 4: For "dead" and "partial" missions:
   State change: missions.md[In Progress] entry MOVED to missions.md[Pending]
@@ -643,6 +716,11 @@ Step 5: For "unrecoverable" missions (r >= 3):
 
 Step 6: _inject_checkpoint_context() — for first mission with checkpoint:
   State change: journal/pending.md UPDATED with structured checkpoint data
+              (checkpoint_manager.format_recovery_context() formats steps_done,
+               steps_remaining, branch, etc. from the JSON checkpoint file)
+              A sentinel header "## Recovery Context (from previous interrupted run)"
+              is written so create_pending_file() can detect and preserve this
+              section when the mission restarts.
 
 Step 7: format_and_send() — Telegram notification
   State change: outbox.md += restart message + escalation warnings (if any)
@@ -651,11 +729,12 @@ Step 7: format_and_send() — Telegram notification
 ### 8.2 Sanity Flush During start_mission()
 
 ```
-_flush_in_progress_to_done() is called INSIDE start_mission() before inserting
-the new In Progress entry. Any existing In Progress missions are moved to Done.
+_flush_in_progress_to_failed() → _flush_abandoned_in_progress() is called INSIDE
+start_mission() before inserting the new In Progress entry. Any existing In Progress
+missions are moved to Failed (not Done) with a [flushed] tag.
 
 State change: (within modify_missions_file lock)
-  missions.md[In Progress] ALL entries -> missions.md[Done] ✅(ts)
+  missions.md[In Progress] ALL entries -> missions.md[Failed] ❌(ts) [flushed]
   New mission inserted into In Progress
 
 Note: This is a "clean restart" safety mechanism. Under normal operation,
@@ -663,7 +742,8 @@ Note: This is a "clean restart" safety mechanism. Under normal operation,
       Under a crash scenario, recover.py already handled In Progress
       before we get here — so this flush in start_mission() handles
       the edge case where recover.py ran and moved a mission to Pending,
-      but a second stale In Progress entry was missed.
+      but a second stale In Progress entry was missed. Missions are marked
+      Failed (not Done) so history correctly reflects that they did not complete.
 ```
 
 ---
@@ -718,17 +798,45 @@ Step 3: start_runner() -> subprocess.Popen
               .koan-reset-counter, .koan-restart-run CLEARED on startup
               (stale signals from previous session discarded)
 
-Step 4: run.py startup sequence (run_startup):
-  a. run_pending_migrations() — schema migrations applied
+Step 4: run.py startup sequence (delegated to startup_manager.run_startup()):
+  Protected phase "Startup checks":
+  a. config_validator.validate_config_or_raise() — strict config validation (hard stop on error)
   b. recover.recover_missions() — crash recovery (see Section 8.1)
-  c. ensure_github_urls() — github_url fields auto-populated from git remotes
-  d. remote_rename_detector.check_and_fix() — fix renamed remotes
-  e. head_tracker.check_and_update() — detect HEAD branch changes (12h throttle)
-  f. git_sync.sync_and_report() — branch cleanup report
-  g. auto_update check — compare HEAD to upstream
-  h. _startup_delay(30s) — grace window to send /pause before first mission
-  i. hooks.fire_hook("session_start") — user lifecycle hooks
-  j. Telegram startup notification sent
+  c. run_pending_migrations() — schema migrations applied
+  d. ensure_projects_yaml() — projects.yaml auto-creation from env vars if missing
+  e. migrate_memory_to_jsonl() — one-shot memory format migration
+  f. ensure_github_urls() — github_url fields auto-populated from git remotes
+  g. discover_workspace() — workspace discovery (finds additional project repos)
+  h. remote_rename_detector.check_and_fix() — fix renamed remotes
+  i. run_sanity_checks() — instance directory consistency checks
+  j. cleanup_memory() — throttled per-startup memory compaction (24h default)
+  k. prune_missions_done() — trim oversized Done/Failed sections at startup
+  l. cleanup_mission_history() — evict stale mission_history.jsonl entries
+  m. check_health() — agent health check
+  Protected phase "Self-reflection check":
+  n. check_self_reflection() — optional Claude-powered self-reflection session
+  Start on pause / passive:
+  o. handle_start_on_pause() — if KOAN_SKIP_START_PAUSE=1 or .koan-skip-start-pause present, skip startup pause
+  p. handle_start_passive() — enter passive mode if configured
+  Git identity / auth:
+  q. setup_git_identity() — configure GIT_AUTHOR_EMAIL from env/.env
+  r. setup_github_auth() — verify GitHub CLI auth
+  s. Telegram startup notification sent (provider, max_runs, interval, projects, status)
+  Protected phase "Git sync":
+  t. git_sync.sync_and_report() — branch cleanup report
+  u. head_tracker.check_and_update() — detect HEAD branch changes (12h throttle)
+  v. track_koan_commits() — record current HEAD SHA; diff vs previous for changelog
+  w. check_auto_update() — fetch upstream; if new commits, pull + sys.exit(42) restart
+  Daily report / morning ritual:
+  x. run_daily_report() — generate daily summary if due
+  y. run_morning_ritual() — Claude-powered session-start reflection (~90s, skippable)
+  Hook system:
+  z. init_hooks() — discover instance/hooks/*.py modules
+  z2. fire_hook("session_start") — user lifecycle hooks
+  Returns (max_runs, interval, branch_prefix) to main_loop()
+
+Note: The old 30s startup delay (_startup_delay) has been superseded by
+      handle_start_on_pause() + the .koan-skip-start-pause mechanism.
 ```
 
 ### 10.2 Restart Signal Flow
@@ -815,7 +923,7 @@ complete_mission()              [quota/auth?] ---> requeue -> Pending
 
   Pending <-- recover_missions() (r < 3) -- In Progress    (on startup)
   Failed  <-- recover_missions() (r >= 3) -- In Progress   (on startup)
-  Done    <-- _flush_in_progress_to_done() -- In Progress  (start_mission sanity)
+  Failed  <-- _flush_abandoned_in_progress() -- In Progress  (start_mission sanity, [flushed] tag)
 
 Pause State Machine:
 
@@ -875,3 +983,5 @@ Signal files (`.koan-pause`, `.koan-stop`, etc.) follow the pattern:
 - Reader checks existence, then removes (consumes)
 - `unlink(missing_ok=True)` used for safe removal
 - No explicit locking needed: `unlink()` is atomic on Linux
+
+All signal file name constants are centralized in `koan/app/signals.py`. Callers import from there; hardcoding `.koan-*` strings is discouraged.
