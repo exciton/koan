@@ -6265,6 +6265,77 @@ class TestStartMissionSanityFlushLog:
         assert not any("Sanity flush" in w for w in warnings)
 
 
+class TestPruneDecoupledFromFinalization:
+    """B12: history pruning is a standalone step, not a finalization side effect."""
+
+    def _missions_with_many_failed(self, tmp_path, n_failed=35):
+        failed_entries = "\n".join(
+            f"- old failure {i} ❌ (2026-01-01 00:00)" for i in range(n_failed)
+        )
+        missions = tmp_path / "instance" / "missions.md"
+        missions.parent.mkdir(parents=True)
+        missions.write_text(
+            "# Missions\n\n## Pending\n\n- /plan finish me\n\n"
+            "## In Progress\n\n"
+            f"## Failed\n\n{failed_entries}\n"
+        )
+        return missions
+
+    def test_finalization_triggers_history_prune(self, tmp_path):
+        """Completing a mission still trims an oversized Failed section..."""
+        from app.run import _update_mission_in_file
+        from app.missions import parse_sections
+
+        missions = self._missions_with_many_failed(tmp_path, n_failed=35)
+        assert _update_mission_in_file(str(missions.parent), "/plan finish me") is True
+
+        sections = parse_sections(missions.read_text())
+        # Default failed_keep=30: the 35 old failures are trimmed to 30.
+        assert len(sections["failed"]) == 30
+        # ...and the mission still moved to Done.
+        assert "/plan finish me" in "\n".join(sections["done"])
+
+    def test_prune_failure_does_not_break_finalization(self, tmp_path):
+        """A pruning error must not roll back or fail the mission move (B12).
+
+        Pruning runs as its own step after the move commits, so even if it
+        blows up the finalization result stands.
+        """
+        from app.run import _update_mission_in_file
+        from app.missions import parse_sections
+
+        missions = self._missions_with_many_failed(tmp_path, n_failed=35)
+
+        with patch(
+            "app.missions.prune_completed_sections",
+            side_effect=RuntimeError("prune boom"),
+        ):
+            result = _update_mission_in_file(str(missions.parent), "/plan finish me")
+
+        # Move succeeded despite the pruning error...
+        assert result is True
+        sections = parse_sections(missions.read_text())
+        assert "/plan finish me" in "\n".join(sections["done"])
+        # ...and the (unpruned) Failed history is intact, not corrupted.
+        assert len(sections["failed"]) == 35
+
+    def test_prune_helper_is_noop_below_threshold(self, tmp_path):
+        """_prune_missions_history leaves a small history untouched."""
+        from app.run import _prune_missions_history
+
+        missions = tmp_path / "instance" / "missions.md"
+        missions.parent.mkdir(parents=True)
+        original = (
+            "# Missions\n\n## Pending\n\n## In Progress\n\n"
+            "## Done\n\n- one done ✅ (2026-01-01 00:00)\n"
+        )
+        missions.write_text(original)
+        _prune_missions_history(str(missions.parent))
+        # Under the keep threshold → content unchanged.
+        from app.missions import parse_sections
+        assert len(parse_sections(missions.read_text())["done"]) == 1
+
+
 # ---------------------------------------------------------------------------
 # Test: _run_iteration returns productive/idle boolean
 # ---------------------------------------------------------------------------
