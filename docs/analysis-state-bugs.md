@@ -336,11 +336,11 @@ Added `TestPendingJournalSingleUse` verifying second mission gets "dead" state.
 
 ---
 
-#### B8 — GitHub `processed_comments` set is in-memory; bridge restart causes duplicate comment dispatch
+#### B8 — GitHub `processed_comments` set is in-memory; bridge restart causes duplicate comment dispatch ✅ ALREADY FIXED
 
-**Files:** `koan/app/github_notifications.py`, `koan/app/awake.py`
+**Files:** `koan/app/github_notifications.py`, `koan/app/github_notification_tracker.py`, `koan/app/github_command_handler.py`
 
-**Problem:**
+**Problem (as originally analysed):**
 The set of already-processed GitHub notification comment IDs is in-memory
 (`processed_comments` or equivalent). After bridge restart, the set is empty.
 The next GitHub poll returns recently-processed comments (especially those
@@ -354,10 +354,26 @@ The reaction IS checked in `check_already_processed()` but only if the reaction
 write in step 1 was processed by GitHub by the time step 2 polls. Under load
 the reaction can appear after the next poll.
 
-**Fix:**
-Persist the processed comment IDs to disk (`instance/.github-processed-comments.json`)
-with a TTL of 24h to bound file growth. On startup, load from disk to restore
-the in-memory set.
+**Resolution:**
+On review of the current code, this is already handled by a persistent tracker —
+no further change required. `github_notification_tracker.py` maintains
+`instance/.koan-github-processed.json` (comment IDs) and
+`instance/.koan-github-processed-threads.json` (assignment-notification keys),
+both with a 7-day TTL and a 5000-entry cap. The in-memory `BoundedSet` is now
+just a fast first-level cache:
+
+- **Write side:** `github_command_handler.py` calls `track_comment(instance_dir, comment_id)`
+  at dispatch time (both for inline-handled commands and queued slash missions),
+  persisting the ID before/alongside the mission queue.
+- **Read side:** `check_already_processed()` consults the in-memory set, then the
+  persistent tracker (`is_comment_tracked()`), then GitHub reactions — in that
+  order — so a restart that empties the in-memory set still finds the comment in
+  the on-disk tracker.
+
+This is the same persistence pattern as the B4 Telegram-offset fix. The original
+proposed file name (`.github-processed-comments.json`, 24h TTL) differs from what
+shipped (`.koan-github-processed.json`, 7-day TTL) but the behaviour is equivalent
+and stronger. Only this doc was stale.
 
 ---
 
