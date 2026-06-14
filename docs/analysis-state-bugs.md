@@ -1,0 +1,963 @@
+# Kōan — State Consistency Bugs, Simplifications, and Documentation Gaps
+
+Analysis based on reading: `missions.py`, `recover.py`, `mission_executor.py`,
+`stagnation_monitor.py`, `outbox_manager.py`, `awake.py`, `loop_manager.py`,
+and cross-referencing the state-flow analysis in `analysis-state-flow.md`.
+
+---
+
+## 1. Bugs and Race Conditions
+
+### P1 — Critical
+
+---
+
+#### B1 — Stagnation retry counter resets after every requeue (infinite stagnation loop possible) ✅ FIXED
+
+**Branch:** `claude/fix-stagnation-key`
+
+**PR description:**
+> **fix(stagnation): strip lifecycle markers from mission key before hashing**
+>
+> `_mission_key()` previously hashed the raw mission title including ⏳/▶ timestamps,
+> `[r:N]` recovery counters, and `[complexity:X]` tags. After `requeue_mission()` strips
+> those markers, the re-picked mission acquires new timestamps — producing a different hash
+> and silently resetting the stagnation retry counter on every cycle.
+> `max_retry_on_stagnation` was therefore never reached and a persistently-stagnating
+> mission would loop indefinitely.
+>
+> Now `_mission_key()` strips all lifecycle markers before hashing, making the key stable
+> across requeue cycles. Also fixes B13 (same root cause). Tests added.
+
+**Files:** `koan/app/stagnation_monitor.py:379-381`, `koan/app/run.py` `_finalize_mission`
+
+**Problem:**
+`_mission_key()` hashes the raw `mission_title` string which includes lifecycle
+timestamps (`⏳(2026-01-01T12:00) ▶(2026-01-01T12:05)`).
+
+After stagnation, `requeue_mission()` strips those timestamps. When the mission
+is re-picked from Pending it acquires new timestamps. The new `_mission_key` is
+therefore different from the key used to increment the counter. The retry count
+for the new key is 0, so the `retry_count < max_retry` check always passes —
+`max_retry_on_stagnation` is never reached.
+
+A mission that stagnates every run will be requeued indefinitely.
+
+---
+
+#### B2 — Complex missions (`### ` format) in In Progress are never recovered ✅ FIXED
+
+**Branch:** `claude/fix-complex-mission-recovery`
+
+**Files:** `koan/app/recover.py`, `koan/tests/test_recover.py`
+
+**Problem:**
+`recover_missions()` scans In Progress line-by-line. Lines starting with `### ` 
+set `in_complex_mission = True` and are kept in `remaining_in_progress` — they
+are never moved to Pending or Failed. On every restart, complex missions
+continue to accumulate in In Progress without recovery.
+
+**Fix applied:**
+- Replaced the simple `in_complex_mission` flag with a `_finalize_complex_block()` helper
+- Entire block (header + sub-items) is collected and classified as a unit
+- Recoverable: entire block moves to Pending with `[r:N]` in the `### ` header
+- Unrecoverable: header line moves to Failed
+- Incomplete sub-items (no strikethrough) are picked as individual missions by `extract_next_pending()`
+- Also incorporates the B7 fix (single-use journal_available flag)
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(recover): recover complex ### mission blocks from In Progress`
+
+**Body:**
+
+## Problem
+Multi-step missions using the `### Header
+- Step 1
+- Step 2` format were silently skipped by crash recovery. They stayed in In Progress indefinitely and were never re-queued.
+
+## Changes
+- Replaced simple `in_complex_mission` flag with `_finalize_complex_block()` inner function
+- Entire block (header line + sub-items) collected and classified together using the header as the mission key
+- Recoverable block: all lines moved to Pending with `[r:N]` in the `### ` header
+- Sub-items with strikethrough (completed steps) preserved; incomplete steps picked as normal missions
+- Also incorporates B7 fix: `has_pending_journal` consumed for first claiming mission only
+
+## Test
+70 tests pass. `test_skip_complex_mission` renamed to `test_recover_complex_mission_block` with updated assertions.
+</details>
+
+---
+
+#### B3 — `create_pending_file()` overwrites checkpoint recovery context ✅ FIXED
+
+**Branch:** `claude/fix-checkpoint-overwrite`
+
+**Files:** `koan/app/loop_manager.py`, `koan/tests/test_loop_manager.py`
+
+**Problem:**
+`recover.py._inject_checkpoint_context()` appends structured checkpoint context
+to `journal/pending.md` at startup. When the recovered mission is started,
+`create_pending_file()` overwrites pending.md with a fresh header, destroying
+the checkpoint context before Claude reads it.
+
+**Fix applied:**
+- Added `_RECOVERY_CONTEXT_SENTINEL = "## Recovery Context (from previous interrupted run)"`
+- Before writing, `create_pending_file()` checks for the sentinel in the existing pending.md
+- If found, appends the checkpoint section after the new header
+- Regular pending.md content (no sentinel) is not carried over
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(loop_manager): preserve checkpoint recovery context in create_pending_file`
+
+**Body:**
+
+## Problem
+`recover.py._inject_checkpoint_context()` writes structured recovery data to pending.md at startup. `create_pending_file()` called when the mission starts then overwrote it completely, making the "partial" state classification a no-op.
+
+## Changes
+- `create_pending_file()` reads existing pending.md before writing
+- If the recovery context sentinel is found, the checkpoint section is appended after the new header
+- Also wraps `journal_dir.mkdir()` in `contextlib.suppress(OSError)` (B14 fix)
+
+## Test
+Added `test_preserves_recovery_context_from_pending_md` and `test_does_not_preserve_regular_pending_md`.
+</details>
+
+---
+
+
+
+#### B4 — Telegram `offset` is in-memory only; messages re-delivered after bridge restart ✅ FIXED
+
+**Branch:** `claude/fix-telegram-offset`
+
+**Files:** `koan/app/awake.py`
+
+**Problem:**
+`offset = None` is a local variable in `main()`. After bridge restart via
+`os.execv()`, `offset` is reinitialized to `None`.
+
+Telegram ACK works by calling `getUpdates(offset=N)` which confirms updates
+through N-1 server-side. If the bridge is restarted BETWEEN receiving a batch
+of updates and calling `getUpdates` again (which would have confirmed them),
+all messages in that batch are re-delivered. Each message is then processed
+again: missions queued twice, commands executed twice.
+
+**Example window:**
+```
+getUpdates(offset=5) → returns updates [5, 6, 7]
+Process update 5: in-memory offset = 6
+Process update 6: in-memory offset = 7
+Process update 7: in-memory offset = 8
+<-- bridge crashes here -->
+getUpdates(offset=8) is NEVER called → 5,6,7 not confirmed on Telegram server
+Next run: getUpdates(None) → gets 5,6,7 again → queued as duplicate missions
+```
+
+**Fix:**
+Persist the last `offset` to disk atomically (e.g., `instance/.telegram-offset`)
+after each successful batch. On startup, read this file to resume from the
+correct offset.
+
+**Fix applied:**
+- Added `_load_offset()` / `_save_offset()` helpers using `instance/.telegram-offset.json`
+- `_save_offset(offset)` called after every `update_id` advance (atomic write)
+- `_load_offset()` called at bridge startup to resume from persisted offset
+- Tests: `_load_offset` mocked in `TestMainLoop` autouse fixture
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(awake): persist Telegram polling offset across bridge restarts`
+
+**Body:**
+
+## Problem
+Telegram `offset` was in-memory only. After bridge restart the offset reset to `None`, causing Telegram to re-deliver all updates from the ~60s window before the restart. This could cause duplicate mission queuing.
+
+## Changes
+- `_save_offset(offset)` persists to `instance/.telegram-offset.json` atomically on each `update_id` advance
+- `_load_offset()` reads the persisted value at startup
+- `TestMainLoop` autouse fixture mocks `_load_offset` to return `None` for isolation
+
+## Test
+267 tests pass. 1 pre-existing root-permission test excluded.
+</details>
+
+---
+
+### P2 — Moderate
+
+---
+
+#### B5 — `_flush_in_progress_to_done()` marks abandoned missions as Done (✅) not Failed ✅ FIXED
+
+**Branch:** `claude/fix-flush-to-failed`
+
+**Files:** `koan/app/missions.py`, `koan/tests/test_missions.py`
+
+**Problem:**
+`start_mission()` calls `_flush_in_progress_to_done()` as a safety net before
+inserting a new In Progress entry. This marks any stale In Progress missions
+with a ✅ Done marker.
+
+Under the expected flow, `recover.py` handles stale In Progress missions at
+startup, so this code path should not fire. But it does fire for:
+- Complex missions missed by `recover.py` (see B2)
+- Any edge-case where `recover.py` fails silently (import errors, malformed
+  missions.md sections)
+
+Marking a crashed/abandoned mission as Done creates false history — the user
+sees a ✅ for a mission that never actually completed.
+
+**Fix applied:**
+- Renamed `_move_in_progress_to_done()` → `_flush_abandoned_in_progress()`
+- Changed marker from ✅ Done to ❌ Failed with `[flushed]` tag
+- Inserts into the Failed section (creates it if absent)
+- All related tests updated to assert on `sections["failed"]`
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(missions): redirect abandoned in-progress missions to Failed section`
+
+**Body:**
+
+## Problem
+When `start_mission()` finds stale In Progress missions (sanity enforcement), it was silently moving them to Done with a ✅ marker — creating false history that the work completed successfully. This fires when `recover.py` misses a mission (complex mission blocks, import errors).
+
+## Changes
+- Renamed `_move_in_progress_to_done()` → `_flush_abandoned_in_progress()` for clarity
+- Changed the marker to ❌ with a `[flushed]` tag inserted into the Failed section
+- Creates the Failed section if it doesn't already exist
+- Updated all test assertions to check `sections["failed"]` instead of `sections["done"]`
+
+## Test
+All 415 existing tests pass (1 pre-existing root-permission test excluded).
+</details>
+
+---
+
+#### B6 — Two independent retry systems accumulate silently; combined limit undocumented ✅ FIXED
+
+**Branch:** `claude/fix-unified-retry-cap`
+
+**Files:** `koan/app/stagnation_monitor.py`, `koan/app/recover.py`, `koan/app/run.py`, `koan/app/config.py`, tests
+
+**Problem:**
+There were two separate retry counters with no shared awareness:
+- `[r:N]` embedded in mission text in missions.md: tracks crash-recovery attempts (max 3, hardcoded)
+- `.stagnation-retries.json`: tracks stagnation-requeue attempts (max configurable)
+
+A mission could cycle between stagnating and crashing indefinitely because neither counter knew about the other, and clearing one on any non-stagnation exit reset cross-system progress.
+
+**Fix applied (three commits, one branch):**
+
+Commit 1 — cross-system ceiling (`total_attempts`):
+- Added `total_attempts` field to stagnation tracker; incremented by both stagnation requeues and crash-recovery on requeue
+- New `max_total_retries` config key (default 0 = disabled) acts as a single shared cap
+- `clear_retry_count(clear_total=False)` preserves `total_attempts` across crash cycles
+- Both `classify_mission_state()` and the stagnation requeue path in `run.py` check the combined cap
+
+Commit 2 — unified storage (remove `[r:N]` tags from missions.md):
+- Renamed `.stagnation-retries.json` → `.mission-retries.json` with auto-migration
+- Added `crash_count` field alongside existing stagnation `count`; new `get_crash_count()` / `increment_crash_count()` API
+- `increment_crash_count()` also increments `total_attempts` for combined cap
+- `max_crash_retries` config key (default 3) replaces hardcoded `MAX_RECOVERY_ATTEMPTS`
+- `classify_mission_state()` now takes `crash_count: int` instead of parsing `[r:N]` from mission text
+- Backward compat: legacy `[r:N]` tags in existing missions.md are read for classification but never seeded to tracker; stripped on next write
+
+Commit 3 — counter lifetime (preserve in Failed; clear on human retry):
+- Counter is **not** cleared when stagnation cap is hit or mission is escalated to Failed — the human can inspect `.mission-retries.json` to see why the mission stopped
+- Counter is cleared at `start_mission()` time **only when a cap was previously hit** (`stag_count >= max_retry` OR `crash_count >= max_crash_retries` OR `total >= max_total`), signalling a deliberate human retry
+- Ongoing stagnation-retry requeus (count < cap) keep their counter intact so the cap check still fires on the next cycle
+- New `_clear_if_cap_hit()` helper encapsulates the conditional clear logic
+
+**Counter clear table:**
+
+| Event | Counter action |
+|---|---|
+| Crash → Failed | preserve all |
+| Stagnation cap hit → Failed | preserve all |
+| Escalated unrecoverable → Failed | preserve all |
+| Stagnation retry requeue (count < cap) | preserve (cap still needs to fire) |
+| Mission success | full clear |
+| `start_mission()` with cap-hit counter | full clear (human deliberate retry) |
+
+<details>
+<summary>PR description</summary>
+
+See `docs/pr-links.md` — B6 section.
+</details>
+
+---
+
+#### B7 — `has_pending_journal` flag in `recover.py` applies to all in-progress missions ✅ FIXED
+
+**Branch:** `claude/fix-recover-pending-journal-scope` (also in `claude/fix-complex-mission-recovery`)
+
+**Files:** `koan/app/recover.py`, `koan/tests/test_recover.py`
+
+**Problem:**
+`has_pending_journal` is computed ONCE before the loop over all In Progress
+missions. If there are N in-progress missions (unusual but possible under bug
+conditions), all of them are classified as "partial" if any `pending.md`
+exists — even if only one mission created it.
+
+"partial" missions get checkpoint context injected, which currently does nothing
+useful (B3), but the classification itself affects the audit log.
+
+**Fix applied:**
+- `journal_available` flag replaces the per-call `has_pending_journal` inside the loop
+- Consumed (set to `False`) after the first mission claims "partial" state
+- Tested in `TestPendingJournalSingleUse::test_only_first_mission_gets_partial_state`
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(recover): consume pending.md context for first mission only`
+
+**Body:**
+
+## Problem
+`has_pending_journal` was computed once and applied to all in-progress missions. With multiple stale missions, all were classified as "partial" even though pending.md was written by exactly one interrupted run.
+
+## Changes
+- `journal_available` local flag initialized from `has_pending_journal`
+- Set to `False` after first "partial" classification, so subsequent missions are correctly classified as "dead"
+
+## Test
+Added `TestPendingJournalSingleUse` verifying second mission gets "dead" state.
+</details>
+
+---
+
+#### B8 — GitHub `processed_comments` set is in-memory; bridge restart causes duplicate comment dispatch ✅ ALREADY FIXED
+
+**Files:** `koan/app/github_notifications.py`, `koan/app/github_notification_tracker.py`, `koan/app/github_command_handler.py`
+
+**Problem (as originally analysed):**
+The set of already-processed GitHub notification comment IDs is in-memory
+(`processed_comments` or equivalent). After bridge restart, the set is empty.
+The next GitHub poll returns recently-processed comments (especially those
+acknowledged via reaction in the SAME poll cycle as the restart).
+
+Scenario: GitHub @mention arrives → reaction added → mission queued → bridge
+restarts → GitHub poll returns the same comment (reaction was just added,
+GitHub notification system has ~60s lag) → duplicate mission queued.
+
+The reaction IS checked in `check_already_processed()` but only if the reaction
+write in step 1 was processed by GitHub by the time step 2 polls. Under load
+the reaction can appear after the next poll.
+
+**Resolution:**
+On review of the current code, this is already handled by a persistent tracker —
+no further change required. `github_notification_tracker.py` maintains
+`instance/.koan-github-processed.json` (comment IDs) and
+`instance/.koan-github-processed-threads.json` (assignment-notification keys),
+both with a 7-day TTL and a 5000-entry cap. The in-memory `BoundedSet` is now
+just a fast first-level cache:
+
+- **Write side:** `github_command_handler.py` calls `track_comment(instance_dir, comment_id)`
+  at dispatch time (both for inline-handled commands and queued slash missions),
+  persisting the ID before/alongside the mission queue.
+- **Read side:** `check_already_processed()` consults the in-memory set, then the
+  persistent tracker (`is_comment_tracked()`), then GitHub reactions — in that
+  order — so a restart that empties the in-memory set still finds the comment in
+  the on-disk tracker.
+
+This is the same persistence pattern as the B4 Telegram-offset fix. The original
+proposed file name (`.github-processed-comments.json`, 24h TTL) differs from what
+shipped (`.koan-github-processed.json`, 7-day TTL) but the behaviour is equivalent
+and stronger. Only this doc was stale.
+
+---
+
+#### B9 — `start_mission()` silently succeeds when mission not found in Pending ✅ FIXED
+
+**Branch:** `claude/fix-start-mission-return`
+
+**Files:** `koan/app/run.py`, `koan/app/mission_executor.py`
+
+**Problem:**
+If `_remove_pending_by_text()` returns `None` (mission text doesn't match
+anything in Pending), `start_mission()` returns the content unchanged. The
+caller in `run.py` does not check whether the transition actually occurred.
+
+The mission is then executed with it still visible in the Pending section.
+During execution:
+- `/list` command shows the mission as Pending
+- Users may queue it again, creating a duplicate
+- If the process crashes mid-execution, `recover.py` finds nothing in In Progress
+  and does not recover → the mission stays in Pending looking untouched
+
+This can be triggered by missions with embedded double-spaces (fixed in
+`_remove_item_by_text` with `re.sub(r"\s+", " ")` but only for whitespace
+not for other normalisation differences), or by edge cases in
+`_COMPLEXITY_TAG_RE` stripping.
+
+**Fix applied:**
+- `_start_mission_in_file()` now returns `bool` (True = confirmed in In Progress)
+- After locked write, reads resulting content via `parse_sections()` to verify mission is in In Progress
+- Logs WARNING on mismatch
+- `mission_executor.py` aborts the run when transition is unconfirmed (returns `False`)
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(run): verify start_mission transition and abort on mismatch`
+
+**Body:**
+
+## Problem
+`_start_mission_in_file()` discarded the return value of `modify_missions_file()` and could not detect whether the mission actually moved to In Progress. Silent failure left the mission in Pending while Claude executed it.
+
+## Changes
+- `_start_mission_in_file()` returns `bool`
+- Reads In Progress section via `parse_sections()` after write to confirm transition
+- `mission_executor.py` aborts the run (returns `False`) when unconfirmed
+
+## Test
+749 tests pass.
+</details>
+
+---
+
+### P3 — Minor
+
+---
+
+#### B10 — `requeue_mission()` inserts at top of Pending queue (undocumented priority behavior) ✅ FIXED
+
+**Branch:** `claude/fix-requeue-priority-docs`
+
+**Files:** `koan/app/missions.py`
+
+**Problem:**
+`requeue_mission()` inserts the re-queued mission at the TOP of the Pending
+section (first item after the header). `insert_mission()` inserts at the BOTTOM
+(FIFO). This means quota-requeued or auth-requeued missions skip the queue
+ahead of all other pending work.
+
+This is intentional (you want the interrupted work to resume immediately) but
+is not documented and surprises operators who see queue ordering change
+unexpectedly after a quota pause.
+
+**Fix applied:**
+Added a "Queue position — TOP, not bottom (intentional)" paragraph to the
+`requeue_mission()` docstring contrasting it with `insert_mission()`'s FIFO
+append and explaining why interrupted work resumes ahead of unstarted missions.
+Behaviour is unchanged — this is a documentation-only fix.
+
+---
+
+#### B11 — No telemetry when `complete_mission()` / `fail_mission()` silently finds nothing ✅ FIXED
+
+**Branch:** `claude/fix-finalize-mission-telemetry`
+
+**Files:** `koan/app/missions.py`, `koan/app/run.py`, `koan/tests/test_missions.py`, `koan/tests/test_run.py`
+
+**Problem:**
+`_move_pending_to_section()` returns the content unchanged if the mission is
+not found in Pending or In Progress. The caller never knows whether the
+transition happened. Silent no-ops here mask data corruption or race
+conditions.
+
+Worse, `run.py`'s `_update_mission_in_file()` inferred success by comparing
+content *before* and *after* the locked write. Because
+`prune_completed_sections()` runs unconditionally on that path, an oversized
+Done/Failed section makes the content differ even on a genuine no-op — so an
+absent mission was wrongly reported as moved (returning `True`), masking a
+stuck mission that re-dispatches on every loop.
+
+**Fix applied:**
+- `_move_pending_to_section()` now returns a `(content, found: bool)` tuple
+- New `complete_mission_checked()` / `fail_mission_checked()` expose the found
+  flag; `complete_mission()` / `fail_mission()` keep their `str` return as thin
+  wrappers (no caller/test churn)
+- `_update_mission_in_file()` captures found-status via a closure flag (the same
+  pattern `insert_pending_mission()` uses) and bases its WARNING + `bool` return
+  on it — decoupled from the pruning side effect
+
+<details>
+<summary>PR description</summary>
+
+See `docs/pr-links.md` — B11 section.
+</details>
+
+---
+
+#### B12 — `prune_completed_sections()` is called inline in `_update_mission_in_file()` ✅ FIXED
+
+**Branch:** `claude/fix-prune-decoupling`
+
+**Files:** `koan/app/run.py`, `koan/tests/test_run.py`
+
+**Problem:**
+Pruning Done/Failed history is a side effect of mission finalization. If
+pruning fails or is misconfigured, it silently modifies history during a
+`fail_mission()` call, making debugging harder. History trimming and mission
+finalization are separate concerns.
+
+**Fix applied:**
+Extracted pruning into `_prune_missions_history()` — a standalone, **locked**,
+best-effort step run *after* the Done/Failed move commits, rather than inside
+the finalization transform:
+- The finalization write (`_update_mission_in_file`) now does only the mission
+  move; its success no longer depends on pruning.
+- `_prune_missions_history()` uses the missions lock (via `modify_missions_file`)
+  so it cannot race the bridge inserting new missions — unlike the existing
+  startup-time `startup_manager.prune_missions_done()`, which is safe unlocked
+  only because nothing else writes during startup.
+- A pruning error is logged and swallowed, leaving the committed move intact.
+
+Note: pruning still runs per-finalization (so missions.md stays bounded during
+long sessions), but as a separate locked write — the coupling, not the cadence,
+was the problem.
+
+Tests: `TestPruneDecoupledFromFinalization` —
+`test_finalization_triggers_history_prune` (oversized Failed still trimmed),
+`test_prune_failure_does_not_break_finalization` (pruning `RuntimeError` leaves
+the move intact and history uncorrupted), `test_prune_helper_is_noop_below_threshold`.
+
+---
+
+#### B13 — Stagnation `[r:N]` key contamination: crash-recovered missions never hit stagnation cap ✅ FIXED
+
+**Branch:** `claude/fix-stagnation-key` (same fix as B1)
+
+**Files:** `koan/app/stagnation_monitor.py:379`
+
+**Problem:**
+(Relates to B1.) When `recover.py` requeues a mission with an incremented
+`[r:N]` tag, the tag becomes part of the mission text that `_mission_key()`
+hashes. So not only do timestamps change the key (B1), but `[r:1]` produces a
+different key than `[r:2]`, meaning the stagnation retry history is abandoned
+at each crash-recovery cycle, not just each timestamp cycle.
+
+**Fix:** Same as B1 — `_STRIP_FOR_KEY_RE` now strips `[r:N]` tags.
+
+---
+
+#### B14 — `pending.md` journal dir creation failure aborts pending.md write ✅ FIXED
+
+**Branch:** `claude/fix-checkpoint-overwrite` (B3 branch; B14 fix bundled in same commit)
+
+**Files:** `koan/app/loop_manager.py`
+
+**Problem (low severity):** If the per-day journal directory creation fails (disk full, permission denied), the exception propagated and aborted the pending.md write, leaving no checkpoint context for Claude.
+
+**Fix applied:**
+- `journal_dir.mkdir()` wrapped in `contextlib.suppress(OSError)`
+- On failure the dated subdir is skipped but `pending.md` is still written to `instance/journal/`
+
+<details>
+<summary>PR description template</summary>
+
+**Title:** `fix(loop_manager): suppress OSError on dated journal subdir creation`
+
+**Body:**
+
+## Problem
+If `instance/journal/YYYY-MM-DD/` could not be created (disk full, permissions), pending.md was never written, losing checkpoint context for Claude.
+
+## Changes
+- `journal_dir.mkdir()` replaced with `contextlib.suppress(OSError): journal_dir.mkdir()`
+- pending.md write proceeds regardless
+
+## Note
+This fix is bundled in the `claude/fix-checkpoint-overwrite` (B3) branch commit.
+</details>
+
+---
+
+## 2. State Simplifications
+
+---
+
+### S1 — Merge or cross-link the two crash-recovery systems ✅ FIXED
+
+**Branch:** `claude/simplify-flush-crosslink`
+
+**Files:** `koan/app/recover.py`, `koan/app/missions.py`, `koan/app/run.py`
+
+`recover.py` (startup, `[r:N]` in missions.md) and `_flush_in_progress_to_failed`
+(inside `start_mission()`) are independent safety nets for the same scenario.
+Their interaction is not documented. Operators debugging stale In Progress
+missions must check both code paths.
+
+**Fix applied:**
+- `recover.recover_missions()` docstring now cross-links forward to the
+  per-mission flush net and explains it is the primary (startup, → Pending) net.
+- `missions._flush_in_progress_to_failed()` docstring now cross-links back to
+  `recover.py` and notes the caller logs when it fires.
+- `run._start_mission_in_file()` captures the stale In Progress set inside the
+  lock and emits a WARNING naming the flushed missions whenever the sanity flush
+  actually fires — so a flush is now visible in the logs. `missions.py` stays
+  pure (logging lives at the call site, not in the parser).
+
+Tests: `TestStartMissionSanityFlushLog` — flush logged and mission moved to
+Failed with `[flushed]`; silent when In Progress is empty.
+
+---
+
+### S2 — Unify the "mission key" concept across stagnation and recovery counters ✅ FIXED
+
+**Branch:** `claude/simplify-canonical-mission-key`
+
+**Files:** `koan/app/missions.py`, `koan/app/stagnation_monitor.py`, `koan/app/mission_history.py`
+
+Both `stagnation_monitor._mission_key` and `recover.py._strip_recovery_counter`
+deal with extracting a stable identity from mission text. There should be a
+single canonical function (e.g., `missions.canonical_mission_key(text)`) that:
+1. Strips lifecycle timestamps (⏳, ▶, ✅, ❌)
+2. Strips `[r:N]` recovery counters
+3. Strips `[complexity:X]` tags
+4. Strips the `- ` prefix
+
+Used by: `_mission_key()` in stagnation, `mission_history.py`, dedup checks.
+
+**Fix applied — with a scope correction.** Added
+`missions.canonical_mission_key()` (steps 1–4 above) as the single source of
+truth for stable mission identity, and had `stagnation_monitor._mission_key`
+hash its output instead of carrying its own `_STRIP_FOR_KEY_RE`. The SHA-256 is
+**byte-identical**, so existing stagnation/crash trackers keep matching — locked
+in by a golden-hash regression test.
+
+The other two functions named in the suggestion were **deliberately not folded
+in**, because they strip intentionally different things and unifying them would
+change behavior:
+- `mission_history._normalize_key` strips the **project tag** (cross-project
+  dedup) — `canonical_mission_key` keeps it (project is identity-bearing).
+- `recover._strip_recovery_counter` strips **only `[r:N]`** and keeps timestamps
+  (it's a display/cleanup helper, not an identity key).
+Both gained a comment pointing at `canonical_mission_key` so the canonical
+function is discoverable without conflating the three concerns.
+
+Tests: `TestCanonicalMissionKey` (strips lifecycle/recovery/complexity, keeps
+project tag); `test_golden_hash_unchanged` + `test_delegates_to_canonical_mission_key`
+guard against hash drift that would orphan trackers.
+
+---
+
+### S3 — Consolidate outbox writing into a single function ✅ FIXED
+
+**Branch:** `claude/simplify-outbox-append`
+
+**Files:** `koan/app/outbox_manager.py`
+
+`append_to_outbox()` is called from both `run.py` and `awake.py` (via
+`notify.py`). The `OutboxManager.requeue()` method uses raw `open(outbox_file, "a")`
+without going through `append_to_outbox`. This creates two slightly different
+append paths for the same file.
+
+**Fix applied:**
+`OutboxManager.requeue()` now delegates to `utils.append_to_outbox()` (preserving
+the trailing newline so the requeued message stays on its own line), leaving a
+single locked open/write path for outbox.md. The `outbox-failed.md` fallback on
+error is retained.
+
+Tests: `test_requeue_preserves_trailing_newline` (exact newline contract),
+`test_requeue_falls_back_to_failed_on_error` (fallback still triggers when the
+shared append raises).
+
+---
+
+### S4 — Replace `_startup_notified` / `_boot_notified` dual flag pair with an enum ✅ FIXED
+
+**Branch:** `claude/simplify-startup-phase`
+
+**Files:** `koan/app/run.py`, `koan/app/mission_executor.py`
+
+`run.py` maintains two booleans (`_startup_notified`, `_boot_notified`) to
+distinguish "first iteration since start" vs "first iteration after resume".
+Their semantics overlap and neither is reset consistently.
+
+**Fix applied:**
+Replaced the pair with a single `_startup_phase` state (`"boot"` → `"resume"` →
+`"running"`). The two booleans only ever held three valid combinations —
+(first+boot), (first only), (neither) — which map 1:1 to these phases.
+- `run.py`: initialised to `"boot"`; new `_mark_startup_resume()` helper
+  downgrades `running → resume` on `/resume` and counter reset, but **preserves
+  `"boot"`** when no iteration has run yet (start-paused-then-resumed still emits
+  boot banners exactly once — the edge case the old code handled via
+  `_boot_notified` never being reset).
+- `mission_executor.py`: derives `is_boot_iteration` (`phase == "boot"`) and
+  `is_first_iteration` (`phase in {"boot", "resume"}`), then sets `"running"`.
+
+Behavior verified identical across all three scenarios (normal boot, resume
+after a boot iteration, resume before the first iteration).
+
+Tests: `TestStartupPhase` (running→resume, boot preserved, resume idempotent);
+existing first-iteration/resume notification suites updated to drive the phase.
+
+---
+
+### S5 — Signal file proliferation: consolidate restart signals ✅ FIXED
+
+**Branch:** `claude/simplify-restart-signals`
+
+**Files:** `koan/app/restart_manager.py`, `koan/app/api/routes_admin.py`,
+`koan/app/dashboard.py`, `koan/app/run.py`
+
+Three restart-related files exist: `.koan-restart-bridge`, `.koan-restart-run`,
+`.koan-restart` (legacy combined). The legacy file is written alongside the
+two new ones but not consumed by anything. It accumulates on disk.
+
+**Investigation revised the premise — and surfaced a latent bug.** The legacy
+`.koan-restart` is not merely unconsumed: `check_restart()` is only ever called
+with `target="run"` or `target="bridge"` (each consumer polls its own marker),
+yet the **REST API** (`/v1/restart`, `/v1/update`) and the **dashboard**
+(`/api/agent/restart`) signalled restarts by touching *only* the legacy file —
+so those endpoints were **silent no-ops** (no consumer ever saw the request).
+The dashboard's own `/api/config/restart` already did it correctly via
+`request_restart()`.
+
+**Fix applied (proper fix, not the literal "stop writing" suggestion):**
+- `routes_admin` `/v1/restart` + `/v1/update`, dashboard `/api/agent/restart`:
+  now call `request_restart()` so both per-consumer markers are written and the
+  restart actually fires.
+- `request_restart()` writes only the two live markers; the deprecated legacy
+  `.koan-restart` is no longer written.
+- `run._startup_delay()` wakes on `.koan-restart-run` instead of the dead legacy
+  file.
+- `restart_manager` keeps the `target=None → .koan-restart` read mapping (for any
+  out-of-tree poller) documented as deprecated read-only compat.
+
+Tests updated across `test_restart_manager`, `test_restart`, `test_api_admin`,
+`test_dashboard`, `test_startup_delay` to assert both consumer markers are
+written and the legacy file is not. `check_restart`/`clear_restart`
+(`target="run"`/`"bridge"`) behavior unchanged.
+
+---
+
+### S6 — `check_pending_journal()` and `has_pending_journal` in `recover.py` are not TOCTOU-safe ✅ FIXED
+
+**Branch:** `claude/simplify-pending-journal-read`
+
+**Files:** `koan/app/recover.py`
+
+`check_pending_journal()` reads `pending.md` (returns True/False), then later
+`recover_missions()` reads it again inside `_recover_transform()`. Between these
+two reads, `run.py` could create a new `pending.md` (if it started before
+`recover_missions()` completed, which should not happen in normal startup
+sequencing but could during tests). The double-read is redundant.
+
+Note on scope: the double-read happens only in recover.py's CLI entry point
+(`python3 recover.py`). The daemon startup path (`startup_manager` →
+`recover_crashed_missions` → `recover_missions`) never calls
+`check_pending_journal()` — it only does the single internal read.
+
+**Fix applied:**
+`recover_missions()` gained an optional `has_pending_journal` kwarg. When a
+caller has already read `pending.md`, it passes the result in and the function
+skips its own read — collapsing the CLI path to a single read and closing the
+TOCTOU window. The default (`None`) preserves the daemon path (compute
+internally) and every existing caller/test (return shape unchanged). The CLI
+`main()` now reads once via `check_pending_journal()` and hands the value down.
+
+Tests: `test_passed_has_pending_overrides_file_read` (supplied `True` classifies
+`partial` with no file on disk), `test_default_none_still_reads_file` (daemon
+path still reads from disk).
+
+---
+
+## 3. Documentation Gaps
+
+---
+
+### D1 — `start_mission()` docstring omits the sanity-flush side effect ✅ FIXED
+
+**Branch:** `claude/simplify-flush-crosslink`
+
+**Fix applied:** The S1 branch updated `start_mission()` docstring to say "As a
+sanity enforcement, any stale In Progress missions are moved to Failed (with a
+[flushed] tag) before the new mission is inserted. Under normal operation In
+Progress is empty here because recover.py handles stale entries at startup; this
+is a fallback safety net." D1 is fully covered by the S1 docstring change.
+
+**File:** `koan/app/missions.py`
+
+Current docstring: "Move a mission from Pending to In Progress with a started
+timestamp."
+
+Missing: "As a side effect, any existing In Progress missions are silently moved
+to Done via `_flush_in_progress_to_done()`. Under normal operation this path
+never fires because `recover.py` runs at startup. If it does fire, the In
+Progress mission will appear as Done even if it never completed successfully."
+
+---
+
+### D2 — `_flush_in_progress_to_done()` is undocumented as a safety net distinct from `recover.py` ✅ FIXED
+
+**Branch:** `claude/simplify-flush-crosslink`
+
+**Fix applied:** The S1 branch rewrote the `_flush_in_progress_to_failed()`
+docstring (renamed from `_flush_in_progress_to_done()` by B5) to explain it is
+a "second line of defence for edge cases recover.py misses" and added a
+"Relationship to crash recovery (two safety nets)" section distinguishing when
+each fires (startup vs mission-start time) and why Failed not Done.
+
+**File:** `koan/app/missions.py:1091`
+
+The existing comment says "Sanity enforcement: only one mission should be in
+progress at a time." It does not explain:
+- That this is a second line of defence after `recover.py`
+- When each fires (startup vs mission-start time)
+- That it marks missions Done rather than Failed (a deliberate choice that
+  should be documented, or corrected — see B5)
+
+---
+
+### D3 — Stagnation retry counter semantics undocumented (per-run vs per-mission) ✅ FIXED
+
+**Branch:** `claude/fix-unified-retry-cap`
+
+**Fix applied:** Expanded the module-level comment block in `stagnation_monitor.py`
+to document the unified counter structure (both `count`/stagnation and
+`crash_count`/recovery in the same `.mission-retries.json` entry, plus
+`total_attempts` for the combined cap). Clarified which function increments which
+counter, when, and when counters are cleared. The "stable" wording is now accurate
+since B1/S2 fixed the key canonicalization.
+
+**File:** `koan/app/stagnation_monitor.py:363-380`
+
+The module-level comment block above the retry-tracking functions says "counters
+are keyed by a stable SHA-256 of the mission title". This implies cross-run
+stability, but the title includes timestamps, making the key effectively
+per-run (see B1). The word "stable" is misleading.
+
+---
+
+### D4 — `requeue_mission()` priority-insertion is undocumented ✅ FIXED
+
+**Branch:** `claude/fix-requeue-priority-docs`
+
+**Fix applied:** The B10 branch updated `requeue_mission()` docstring to explicitly
+say "Queue position — TOP, not bottom (intentional). Requeue inserts at the top of
+the Pending queue so the same mission is retried immediately, preventing lower-priority
+work from cutting ahead after a transient failure."
+
+**File:** `koan/app/missions.py:1217`
+
+The docstring says "Move a mission from In Progress (or Failed) back to Pending."
+It does not mention that the mission is inserted at the TOP of the Pending queue,
+not the bottom. This is a behavior difference from `insert_mission()` that
+matters for queue ordering and operator expectations.
+
+---
+
+### D5 — `trust_stdout=False` in skill dispatch deserves CLAUDE.md mention ✅ FIXED
+
+**Branch:** `claude/docs-trust-stdout`
+
+**Fix applied:** Added a note to the "Adding a new core skill" step 2 in CLAUDE.md:
+"Skill runners write structured agent transcripts to stdout rather than raw CLI output
+— always pass `trust_stdout=False` to `_classify_and_handle_cli_error()` calls for
+skill dispatch to prevent false-positive quota detection."
+
+**File:** `koan/app/mission_executor.py:144-159`, `CLAUDE.md`
+
+The inline comment explains why skill stdout is not trusted for quota detection.
+This is a non-obvious design decision that affects any future developer adding
+a new skill runner.
+
+---
+
+### D6 — Complex missions (`### ` format) in missions.md are undocumented as unsupported by recovery ✅ FIXED
+
+**Branch:** `claude/docs-complex-missions`
+
+**Note:** The underlying code issue was fixed by B2 (`claude/fix-complex-mission-recovery`,
+already merged to main). D6 adds documentation to `recover.py`'s module docstring
+explaining that `### ` blocks in In Progress are now handled as atomic units (requeued
+or escalated together), where block boundaries are, and the cross-link to the
+`_flush_in_progress_to_failed()` secondary safety net.
+
+**File:** `koan/app/recover.py`, `koan/app/missions.py`
+
+The `### project:X` sub-header format inside the Pending section is documented
+in `docs/users/user-manual.md`. But there is no documentation that complex
+missions using the `### ` format within In Progress are skipped by crash
+recovery (see B2). Operators who use the `### ` format for multi-step missions
+should know they could get permanently stuck in In Progress after a crash.
+
+---
+
+### D7 — CLAUDE.md lists `mission_executor.py` as new but `run.py` still contains many cycle functions ✅ FIXED
+
+**Branch:** `claude/docs-claudemd-update`
+
+**Fix applied:** Updated CLAUDE.md to enumerate the functions that remain in `run.py`
+(`run_claude_task`, `_finalize_mission`, `_classify_and_handle_cli_error`,
+`_probe_exit0_quota`), added `mission_executor.py` to the Agent loop pipeline section
+with a description of its per-iteration dispatch role, and updated `mission_runner.py`
+to clarify it is "stateless pipeline helpers" (no side effects on missions.md).
+
+**File:** `CLAUDE.md` Architecture section
+
+CLAUDE.md says "**`run.py`** (agent loop): Pure-Python main loop..." and separately
+lists `mission_runner.py`. But `run.py` still contains `run_claude_task()`,
+`_finalize_mission()`, `_classify_and_handle_cli_error()`,
+`_probe_exit0_quota()` and other core execution functions. The boundary between
+`run.py` and `mission_executor.py` is not clearly documented. (`mission_executor.py`
+was missing from CLAUDE.md entirely.)
+
+---
+
+### D8 — `recover.py` recovery event log (`recovery.jsonl`) is undocumented in CLAUDE.md ✅ FIXED
+
+**Branch:** `claude/simplify-pending-journal-read`
+
+**Fix applied:** Added `recovery.jsonl` to the instance directory section of CLAUDE.md
+with a description of its schema and what a large file implies (crash loop candidate).
+
+**File:** `koan/app/recover.py:107-138`
+
+`recovery.jsonl` is written for every crash recovery event as an audit trail.
+It is listed in Section 1.4 of `analysis-state-flow.md` but not in CLAUDE.md's
+Instance directory section. An operator debugging repeated crashes would not
+know to look at this file.
+
+---
+
+### D9 — `outbox-sending.md` staging file undocumented ✅ FIXED
+
+**Branch:** `claude/simplify-outbox-append`
+
+**Fix applied:** Added `outbox-sending.md` to the instance directory section of
+CLAUDE.md explaining it is a crash-safety two-phase write staging file, what
+happens if it persists (potential duplicate sends), and that it is safe to delete
+manually if messages appear stuck.
+
+**File:** `koan/app/outbox_manager.py:103-123`
+
+The staging file `instance/outbox-sending.md` is created between reading and
+sending outbox content (crash safety). If the bridge crashes mid-send, this
+file persists and is re-processed on restart — which can cause duplicate
+Telegram messages. The `OutboxManager.recover_staged()` docstring mentions
+this, but there is no user-facing documentation (CLAUDE.md, user-manual) that
+explains this file exists and what it means if found.
+
+---
+
+### D10 — State transition diagram in CLAUDE.md is absent ✅ FIXED
+
+**Branch:** `claude/docs-state-diagram`
+
+**Fix applied:** Added an ASCII state diagram to the Architecture section of CLAUDE.md
+showing: Pending → In Progress → Done / Failed transitions, the requeue path back
+to Pending (stagnation, crash, transient error), the two safety nets for stale In
+Progress (recover.py at startup, _flush_in_progress_to_failed() per-mission-start),
+and the key missions.py function responsible for each transition.
+
+**File:** `CLAUDE.md`
+
+CLAUDE.md describes the architecture in prose but contains no state diagram for
+the mission lifecycle (Pending → In Progress → Done/Failed/Pending). The
+`analysis-state-flow.md` Section 12 fills this gap, but should be summarised in
+CLAUDE.md for developer on-boarding.
