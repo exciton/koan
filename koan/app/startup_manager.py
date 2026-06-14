@@ -284,12 +284,17 @@ def prune_missions_done(instance: str):
         return
 
     from app.missions import prune_completed_sections
-    from app.utils import atomic_write
+    from app.utils import modify_missions_file
 
-    content = missions_path.read_text()
-    new_content, pruned = prune_completed_sections(content)
+    pruned = 0
+
+    def _prune(content: str) -> str:
+        nonlocal pruned
+        new_content, pruned = prune_completed_sections(content)
+        return new_content
+
+    modify_missions_file(missions_path, _prune)
     if pruned > 0:
-        atomic_write(missions_path, new_content)
         log("health", f"Pruned {pruned} old Done/Failed items from missions.md")
 
 
