@@ -12,6 +12,7 @@ Kōan is an autonomous background agent that uses idle Claude API quota to work 
 - Treat docs as context to verify against code, not as unquestioned truth. If code and docs disagree, preserve current code behavior unless the task says otherwise, and update the docs to match the resulting behavior.
 - After changing user behavior, configuration, daemon flow, provider behavior, shared state, safety boundaries, or an important implementation decision, update the relevant docs in the same branch.
 - For core skill changes, update both `docs/users/user-manual.md` and `docs/users/skills.md`.
+- Before touching `missions.md` mutation logic, retry counters, signal files, or shared-file state, read `docs/architecture/state-consistency.md` — it captures 9 recurring anti-patterns from the 2026-06 audit with concrete code examples.
 
 ## Commands
 
@@ -55,6 +56,35 @@ Two parallel processes run independently:
 - **`run.py`** (agent loop): Pure-Python main loop with restart wrapper. Core execution host: `run_claude_task()` (CLI subprocess invocation and monitoring), `_finalize_mission()` (lifecycle state machine: Done/Failed/requeue), `_classify_and_handle_cli_error()` (error → action mapping), and `_probe_exit0_quota()` (false-success detection). Signal handling uses double-tap CTRL-C protection (`protected_phase` context manager). Writes real-time status to `.koan-status`. Per-iteration dispatch delegated to `mission_executor.py`; stateless pipeline helpers delegated to `mission_runner.py`.
 
 Communication between processes happens through shared files in `instance/` with atomic writes (`utils.atomic_write()` using temp file + rename + `fcntl.flock()`). Exclusive process instances enforced via `pid_manager.py` (PID file + `fcntl.flock()`).
+
+### Mission lifecycle
+
+```
+                    ┌──────────────────────────────────────────────┐
+   Telegram / API   │              missions.md                      │
+   adds mission ──► │  Pending ──► In Progress ──► Done ✅          │
+                    │     ▲            │                            │
+                    │     │            ▼                            │
+                    │     │         Failed ❌                       │
+                    │     │         (with [flushed] if sanity       │
+                    │     │          flush fired in start_mission)  │
+                    └─────┼────────────────────────────────────────┘
+                          │ requeue_mission()  (TOP of Pending)
+                          │   ← stagnation retry (up to max_retry_on_stagnation)
+                          │   ← crash recovery  (up to MAX_RECOVERY_ATTEMPTS)
+                          │   ← transient error retry (once, via _maybe_retry_mission)
+
+Key transitions (all in missions.py):
+  start_mission()      Pending → In Progress  (+ [flushed] safety-flush of stale IP)
+  complete_mission()   In Progress → Done
+  fail_mission()       In Progress → Failed
+  requeue_mission()    In Progress/Failed → Pending (prepends to queue top)
+
+Safety nets for stale In Progress at startup:
+  recover.py               runs once per startup, moves stale IP back to Pending
+  _flush_in_progress_to_failed()  runs per-mission-start inside start_mission(),
+                           catches anything recover.py missed; marks Failed [flushed]
+```
 
 ### Key modules (`koan/app/`)
 
