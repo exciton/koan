@@ -1039,23 +1039,31 @@ def _remove_item_by_text(
 def _move_pending_to_section(
     content: str, mission_text: str, section_key: str, marker: str, header: str,
     cause_tag: str = "",
-) -> str:
+) -> tuple[str, bool]:
     """Move a mission from Pending (or In Progress) to a target section.
 
     Shared implementation for complete_mission() and fail_mission().
     Searches Pending first, then falls back to In Progress.
-    Returns content unchanged if the mission is not found in either section.
 
     When *cause_tag* is a non-empty string, it is appended in square
     brackets after the timestamp — e.g. ``❌ (2026-04-19 03:45) [stagnation]``.
     Used to surface why a mission failed without parsing logs.
+
+    Returns:
+        A ``(content, found)`` tuple. ``found`` is ``True`` when the mission
+        was located and moved, ``False`` when it was not present in either
+        Pending or In Progress (in which case *content* is returned
+        unchanged). Reporting *found* explicitly lets callers distinguish a
+        genuine no-op from a move whose net content happens to match — a
+        distinction the previous before/after string comparison could not
+        make reliably once unrelated side effects (e.g. history pruning) ran.
     """
     needle = mission_text.strip()
     result = _remove_pending_by_text(content, needle)
     if result is None:
         result = _remove_item_by_text(content, needle, "in_progress")
     if result is None:
-        return content
+        return content, False
 
     updated = result[0]
 
@@ -1083,9 +1091,9 @@ def _move_pending_to_section(
         while insert_at < end and lines[insert_at].strip() == "":
             insert_at += 1
         lines.insert(insert_at, entry)
-        return normalize_content("\n".join(lines))
+        return normalize_content("\n".join(lines)), True
 
-    return normalize_content(updated + f"\n## {header}\n\n{entry}\n")
+    return normalize_content(updated + f"\n## {header}\n\n{entry}\n"), True
 
 
 def _flush_in_progress_to_failed(content: str) -> str:
@@ -1190,6 +1198,20 @@ def start_mission(content: str, mission_text: str) -> str:
     return normalize_content(updated + f"\n## In Progress\n\n{entry}\n")
 
 
+def complete_mission_checked(content: str, mission_text: str) -> tuple[str, bool]:
+    """Move a mission to Done, reporting whether it was found.
+
+    Same behaviour as :func:`complete_mission` but returns a
+    ``(content, found)`` tuple so callers can distinguish a genuine no-op
+    (mission absent) from a successful move. Prefer this over
+    :func:`complete_mission` when the caller needs to surface a missing
+    mission (e.g. to log a warning or abort).
+    """
+    from app.security_audit import MISSION_COMPLETE, log_event
+    log_event(MISSION_COMPLETE, details={"mission": mission_text})
+    return _move_pending_to_section(content, mission_text, "done", "\u2705", "Done")
+
+
 def complete_mission(content: str, mission_text: str) -> str:
     """Move a mission from Pending (or In Progress) to Done with a timestamp.
 
@@ -1197,11 +1219,28 @@ def complete_mission(content: str, mission_text: str) -> str:
 
     Returns:
         Updated content string. Returns original content unchanged if
-        the mission is not found in either section.
+        the mission is not found in either section. Use
+        :func:`complete_mission_checked` when you need to know which case
+        occurred.
     """
-    from app.security_audit import MISSION_COMPLETE, log_event
-    log_event(MISSION_COMPLETE, details={"mission": mission_text})
-    return _move_pending_to_section(content, mission_text, "done", "\u2705", "Done")
+    return complete_mission_checked(content, mission_text)[0]
+
+
+def fail_mission_checked(
+    content: str, mission_text: str, cause_tag: str = "",
+) -> tuple[str, bool]:
+    """Move a mission to Failed, reporting whether it was found.
+
+    Same behaviour as :func:`fail_mission` but returns a ``(content, found)``
+    tuple so callers can distinguish a genuine no-op (mission absent) from a
+    successful move.
+    """
+    from app.security_audit import MISSION_FAIL, log_event
+    log_event(MISSION_FAIL, details={"mission": mission_text, "cause_tag": cause_tag})
+    return _move_pending_to_section(
+        content, mission_text, "failed", "\u274c", "Failed",
+        cause_tag=cause_tag,
+    )
 
 
 def fail_mission(content: str, mission_text: str, cause_tag: str = "") -> str:
@@ -1215,13 +1254,9 @@ def fail_mission(content: str, mission_text: str, cause_tag: str = "") -> str:
     a stuck-in-a-loop abort from a regular failure at a glance.
 
     Returns content unchanged if the mission is not found in either section.
+    Use :func:`fail_mission_checked` when you need to know which case occurred.
     """
-    from app.security_audit import MISSION_FAIL, log_event
-    log_event(MISSION_FAIL, details={"mission": mission_text, "cause_tag": cause_tag})
-    return _move_pending_to_section(
-        content, mission_text, "failed", "\u274c", "Failed",
-        cause_tag=cause_tag,
-    )
+    return fail_mission_checked(content, mission_text, cause_tag=cause_tag)[0]
 
 
 def requeue_mission(content: str, mission_text: str) -> str:

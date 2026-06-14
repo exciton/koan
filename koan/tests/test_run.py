@@ -6191,6 +6191,43 @@ class TestUpdateMissionInFile:
         assert mission not in content.split("## Pending")[1].split("##")[0]
         assert "issues/15" in content.split("## Done")[1]
 
+    def test_not_found_returns_false_even_when_pruning_changes_content(self, tmp_path):
+        """Regression (B11): a missing mission must report False even if the
+        unconditional history prune mutates the file.
+
+        Previously the function inferred success by comparing content before
+        and after the locked write. Because ``prune_completed_sections`` runs
+        regardless of whether the mission was found, an oversized Failed
+        section made the content differ on a genuine no-op — so an absent
+        mission was wrongly reported as moved, masking a stuck mission.
+        """
+        from app.run import _update_mission_in_file
+
+        # 35 Failed entries — above the default failed_keep=30 prune threshold,
+        # so the locked write WILL change the file even though the target
+        # mission is absent from Pending and In Progress.
+        failed_entries = "\n".join(
+            f"- old failure {i} ❌ (2026-01-01 00:00)" for i in range(35)
+        )
+        missions = tmp_path / "instance" / "missions.md"
+        missions.parent.mkdir(parents=True)
+        missions.write_text(
+            "# Missions\n\n## Pending\n\n- /plan unrelated work\n\n"
+            "## In Progress\n\n"
+            f"## Failed\n\n{failed_entries}\n"
+        )
+
+        before = missions.read_text()
+        result = _update_mission_in_file(
+            str(missions.parent), "/plan absent mission",
+        )
+        after = missions.read_text()
+
+        # The mission was never present → must report not-found...
+        assert result is False
+        # ...even though pruning genuinely changed the file content.
+        assert after != before
+
 
 # ---------------------------------------------------------------------------
 # Test: _run_iteration returns productive/idle boolean

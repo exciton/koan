@@ -1817,29 +1817,42 @@ def _update_mission_in_file(
     callers should surface this rather than let it loop silently.
     """
     try:
-        from app.missions import complete_mission, fail_mission, prune_completed_sections
+        from app.missions import (
+            complete_mission_checked,
+            fail_mission_checked,
+            prune_completed_sections,
+        )
         from app.utils import modify_missions_file
         missions_path = Path(instance, "missions.md")
         if not missions_path.exists():
             return False
 
+        # The move functions report found-status directly. We capture it via a
+        # closure flag rather than comparing before/after content: pruning runs
+        # unconditionally and can change the content even when the mission was
+        # never found, which would otherwise mask a silent no-op as success.
+        found = [False]
+
         if failed:
             def transform(content):
-                return fail_mission(content, mission_title, cause_tag=cause_tag)
+                new_content, ok = fail_mission_checked(
+                    content, mission_title, cause_tag=cause_tag,
+                )
+                found[0] = ok
+                return new_content
         else:
             def transform(content):
-                return complete_mission(content, mission_title)
-
-        before = [None]
+                new_content, ok = complete_mission_checked(content, mission_title)
+                found[0] = ok
+                return new_content
 
         def tracked(content):
-            before[0] = content
             result = transform(content)
             result, _ = prune_completed_sections(result)
             return result
 
-        after = modify_missions_file(missions_path, tracked)
-        if before[0] is not None and after == before[0]:
+        modify_missions_file(missions_path, tracked)
+        if not found[0]:
             log("warning", f"Mission not found (no change): {mission_title[:80]}")
             return False
         return True

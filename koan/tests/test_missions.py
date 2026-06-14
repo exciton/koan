@@ -7,9 +7,11 @@ from app.missions import (
     cancel_pending_mission,
     classify_section,
     complete_mission,
+    complete_mission_checked,
     delete_idea,
     extract_timestamps,
     fail_mission,
+    fail_mission_checked,
     format_duration,
     insert_idea,
     insert_mission,
@@ -1590,6 +1592,70 @@ class TestFailMission:
         sections = parse_sections(result)
         assert len(sections["pending"]) == 0
         assert len(sections["failed"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# complete_mission_checked / fail_mission_checked — found-status reporting
+# ---------------------------------------------------------------------------
+
+class TestMissionCheckedVariants:
+    """The *_checked variants report whether the mission was found.
+
+    Callers use the boolean to distinguish a genuine no-op (mission absent)
+    from a successful move, so they can warn instead of looping silently.
+    """
+
+    CONTENT = (
+        "# Missions\n\n"
+        "## Pending\n\n"
+        "- /plan Add dark mode\n\n"
+        "## In Progress\n\n"
+        "- Fix the login bug ▶(2026-01-01T00:00)\n\n"
+        "## Done\n"
+    )
+
+    def test_complete_found_in_pending_reports_true(self):
+        content, found = complete_mission_checked(self.CONTENT, "/plan Add dark mode")
+        assert found is True
+        assert "/plan Add dark mode" in "\n".join(parse_sections(content)["done"])
+
+    def test_complete_found_in_progress_reports_true(self):
+        content, found = complete_mission_checked(self.CONTENT, "Fix the login bug")
+        assert found is True
+        assert "Fix the login bug" in "\n".join(parse_sections(content)["done"])
+
+    def test_complete_absent_reports_false_and_leaves_content(self):
+        content, found = complete_mission_checked(self.CONTENT, "/nonexistent thing")
+        assert found is False
+        assert content == normalize_content(self.CONTENT)
+
+    def test_fail_found_reports_true(self):
+        content, found = fail_mission_checked(self.CONTENT, "/plan Add dark mode")
+        assert found is True
+        assert "/plan Add dark mode" in "\n".join(parse_sections(content)["failed"])
+
+    def test_fail_absent_reports_false_and_leaves_content(self):
+        content, found = fail_mission_checked(self.CONTENT, "/nonexistent thing")
+        assert found is False
+        assert content == normalize_content(self.CONTENT)
+
+    def test_fail_checked_preserves_cause_tag(self):
+        content, found = fail_mission_checked(
+            self.CONTENT, "/plan Add dark mode", cause_tag="stagnation",
+        )
+        assert found is True
+        assert "[stagnation]" in "\n".join(parse_sections(content)["failed"])
+
+    def test_unchecked_wrappers_return_same_content(self):
+        """The str-returning wrappers must equal the checked variant's content."""
+        assert (
+            complete_mission(self.CONTENT, "/plan Add dark mode")
+            == complete_mission_checked(self.CONTENT, "/plan Add dark mode")[0]
+        )
+        assert (
+            fail_mission(self.CONTENT, "/plan Add dark mode")
+            == fail_mission_checked(self.CONTENT, "/plan Add dark mode")[0]
+        )
 
 
 # ---------------------------------------------------------------------------
