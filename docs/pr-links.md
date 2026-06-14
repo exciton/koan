@@ -573,3 +573,165 @@ function for "stable mission identity".
 TestCanonicalMissionKey; test_golden_hash_unchanged (locks the sha256 so future drift can't
 silently orphan trackers); test_delegates_to_canonical_mission_key.
 ```
+
+---
+
+## D3 — Stagnation unified retry counter semantics
+
+**Title:** `docs(stagnation): document unified retry tracker structure and counter semantics`
+
+**Branch:** `claude/fix-unified-retry-cap` (appended to B6)
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/fix-unified-retry-cap?expand=1)
+
+**Body:**
+```
+(see B6 PR body — this documentation commit is part of the same branch)
+
+The module-level comment block above the retry-tracking functions only described stagnation
+requeues. Add an expanded block explaining:
+- Both stagnation and crash failures share .mission-retries.json
+- Full entry structure (count, crash_count, total_attempts, pattern_type)
+- Which function increments which counter and when
+- When counters are cleared (genuine success only)
+```
+
+---
+
+## D5 — trust_stdout=False CLAUDE.md note
+
+**Title:** `docs(claude.md): document trust_stdout=False requirement for skill runners`
+
+**Branch:** `claude/docs-trust-stdout`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/docs-trust-stdout?expand=1)
+
+**Body:**
+```
+## Problem
+Skill runners write structured agent transcripts to stdout (not raw CLI output). Passing
+trust_stdout=True (the default) causes false-positive quota detection because the transcript
+may contain quota-error substrings inside logged tool output. This is a non-obvious constraint
+for anyone adding a new skill runner. Nothing in CLAUDE.md documented it.
+
+## Changes
+- Added trust_stdout=False note to the 'Adding a new core skill' step 2 in CLAUDE.md.
+```
+
+---
+
+## D6 — Complex mission recovery documentation
+
+**Title:** `docs(recover): document complex mission (### format) recovery behavior`
+
+**Branch:** `claude/docs-complex-missions`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/docs-complex-missions?expand=1)
+
+**Body:**
+```
+## Problem
+recover.py's module docstring described simple crash recovery only. The ### sub-header format
+for complex (multi-step) missions was undocumented — no mention of how ### blocks are treated
+during recovery, what the block boundary is, or the relationship to the _flush_in_progress_to_failed()
+secondary safety net.
+
+Note: the underlying code issue (### blocks silently skipped) was already fixed by B2
+(claude/fix-complex-mission-recovery, merged to main).
+
+## Changes
+- Added a 'Complex mission format' section to recover.py's module docstring explaining:
+  - ### blocks are treated as atomic units (requeued or escalated together)
+  - Block boundary: next blank line or next ### header
+  - Cross-link to _flush_in_progress_to_failed() as secondary safety net
+```
+
+---
+
+## D7 — CLAUDE.md run.py / mission_executor boundary
+
+**Title:** `docs(claude.md): clarify run.py vs mission_executor vs mission_runner boundary`
+
+**Branch:** `claude/docs-claudemd-update`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/docs-claudemd-update?expand=1)
+
+**Body:**
+```
+## Problem
+CLAUDE.md's architecture section described run.py generically without naming which functions
+stay there, and mission_executor.py (extracted from run.py) was missing from the key modules
+list entirely. A developer reading CLAUDE.md couldn't tell which of the three files (run.py,
+mission_executor.py, mission_runner.py) to look at for a given concern.
+
+## Changes
+- Updated run.py one-liner to enumerate the functions that remain there:
+  run_claude_task, _finalize_mission, _classify_and_handle_cli_error, _probe_exit0_quota
+- Added mission_executor.py to the Agent loop pipeline section (per-iteration dispatch layer)
+- Updated mission_runner.py description to clarify it is stateless pipeline helpers
+  (no side effects on missions.md)
+```
+
+---
+
+## D8 — recovery.jsonl in CLAUDE.md instance section
+
+**Title:** `docs(claude.md): add recovery.jsonl to instance directory section`
+
+**Branch:** `claude/simplify-pending-journal-read` (appended to S6)
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/simplify-pending-journal-read?expand=1)
+
+**Body:**
+```
+(see S6 PR body — this documentation commit is part of the same branch)
+
+Added recovery.jsonl to the instance/ directory listing in CLAUDE.md with a description
+of its schema and interpretation (many entries = crash loop candidate).
+```
+
+---
+
+## D9 — outbox-sending.md in CLAUDE.md instance section
+
+**Title:** `docs(claude.md): document outbox-sending.md staging file in instance section`
+
+**Branch:** `claude/simplify-outbox-append` (appended to S3)
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/simplify-outbox-append?expand=1)
+
+**Body:**
+```
+(see S3 PR body — this documentation commit is part of the same branch)
+
+Added outbox-sending.md to the instance/ directory listing in CLAUDE.md explaining it is a
+crash-safety two-phase write staging file, what happens if it persists (potential duplicate
+Telegram sends), and that it can be safely deleted manually if messages appear stuck.
+```
+
+---
+
+## D10 — Mission lifecycle state diagram
+
+**Title:** `docs(claude.md): add mission lifecycle state diagram`
+
+**Branch:** `claude/docs-state-diagram`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/docs-state-diagram?expand=1)
+
+**Body:**
+```
+## Problem
+CLAUDE.md described mission states in prose only — no visual summary of the lifecycle, the
+requeue path, or the two safety nets for stale In Progress missions. Developer on-boarding
+required reading the full analysis-state-flow.md to understand the state machine.
+
+## Changes
+- Added a 'Mission lifecycle' subsection to the Architecture section of CLAUDE.md
+- ASCII state diagram showing:
+  - Pending → In Progress → Done / Failed transitions
+  - The requeue path back to Pending (stagnation retry, crash recovery, transient error retry)
+  - Both safety nets for stale In Progress: recover.py (startup) and
+    _flush_in_progress_to_failed() (per-mission-start)
+  - The key missions.py function responsible for each transition
+```

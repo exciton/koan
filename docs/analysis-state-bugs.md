@@ -770,9 +770,17 @@ path still reads from disk).
 
 ---
 
-### D1 — `start_mission()` docstring omits the sanity-flush side effect
+### D1 — `start_mission()` docstring omits the sanity-flush side effect ✅ FIXED
 
-**File:** `koan/app/missions.py:1139`
+**Branch:** `claude/simplify-flush-crosslink`
+
+**Fix applied:** The S1 branch updated `start_mission()` docstring to say "As a
+sanity enforcement, any stale In Progress missions are moved to Failed (with a
+[flushed] tag) before the new mission is inserted. Under normal operation In
+Progress is empty here because recover.py handles stale entries at startup; this
+is a fallback safety net." D1 is fully covered by the S1 docstring change.
+
+**File:** `koan/app/missions.py`
 
 Current docstring: "Move a mission from Pending to In Progress with a started
 timestamp."
@@ -784,7 +792,15 @@ Progress mission will appear as Done even if it never completed successfully."
 
 ---
 
-### D2 — `_flush_in_progress_to_done()` is undocumented as a safety net distinct from `recover.py`
+### D2 — `_flush_in_progress_to_done()` is undocumented as a safety net distinct from `recover.py` ✅ FIXED
+
+**Branch:** `claude/simplify-flush-crosslink`
+
+**Fix applied:** The S1 branch rewrote the `_flush_in_progress_to_failed()`
+docstring (renamed from `_flush_in_progress_to_done()` by B5) to explain it is
+a "second line of defence for edge cases recover.py misses" and added a
+"Relationship to crash recovery (two safety nets)" section distinguishing when
+each fires (startup vs mission-start time) and why Failed not Done.
 
 **File:** `koan/app/missions.py:1091`
 
@@ -797,7 +813,16 @@ progress at a time." It does not explain:
 
 ---
 
-### D3 — Stagnation retry counter semantics undocumented (per-run vs per-mission)
+### D3 — Stagnation retry counter semantics undocumented (per-run vs per-mission) ✅ FIXED
+
+**Branch:** `claude/fix-unified-retry-cap`
+
+**Fix applied:** Expanded the module-level comment block in `stagnation_monitor.py`
+to document the unified counter structure (both `count`/stagnation and
+`crash_count`/recovery in the same `.mission-retries.json` entry, plus
+`total_attempts` for the combined cap). Clarified which function increments which
+counter, when, and when counters are cleared. The "stable" wording is now accurate
+since B1/S2 fixed the key canonicalization.
 
 **File:** `koan/app/stagnation_monitor.py:363-380`
 
@@ -806,13 +831,16 @@ are keyed by a stable SHA-256 of the mission title". This implies cross-run
 stability, but the title includes timestamps, making the key effectively
 per-run (see B1). The word "stable" is misleading.
 
-**Fix:** Update the comment to be explicit: "keyed by SHA-256 of the mission
-title TEXT including timestamps — effectively per-execution, not per-mission."
-Then either fix B1 or document this as a known limitation.
-
 ---
 
-### D4 — `requeue_mission()` priority-insertion is undocumented
+### D4 — `requeue_mission()` priority-insertion is undocumented ✅ FIXED
+
+**Branch:** `claude/fix-requeue-priority-docs`
+
+**Fix applied:** The B10 branch updated `requeue_mission()` docstring to explicitly
+say "Queue position — TOP, not bottom (intentional). Requeue inserts at the top of
+the Pending queue so the same mission is retried immediately, preventing lower-priority
+work from cutting ahead after a transient failure."
 
 **File:** `koan/app/missions.py:1217`
 
@@ -823,20 +851,32 @@ matters for queue ordering and operator expectations.
 
 ---
 
-### D5 — `trust_stdout=False` in skill dispatch deserves CLAUDE.md mention
+### D5 — `trust_stdout=False` in skill dispatch deserves CLAUDE.md mention ✅ FIXED
 
-**File:** `koan/app/mission_executor.py:144-159`
+**Branch:** `claude/docs-trust-stdout`
+
+**Fix applied:** Added a note to the "Adding a new core skill" step 2 in CLAUDE.md:
+"Skill runners write structured agent transcripts to stdout rather than raw CLI output
+— always pass `trust_stdout=False` to `_classify_and_handle_cli_error()` calls for
+skill dispatch to prevent false-positive quota detection."
+
+**File:** `koan/app/mission_executor.py:144-159`, `CLAUDE.md`
 
 The inline comment explains why skill stdout is not trusted for quota detection.
 This is a non-obvious design decision that affects any future developer adding
-a new skill runner. The CLAUDE.md "Conventions" section should note: "Skill
-runners write summarized agent transcripts to stdout (DATA, not CLI output).
-Use `trust_stdout=False` in `_classify_and_handle_cli_error()` calls for skill
-dispatch to prevent false-positive quota detection."
+a new skill runner.
 
 ---
 
-### D6 — Complex missions (`### ` format) in missions.md are undocumented as unsupported by recovery
+### D6 — Complex missions (`### ` format) in missions.md are undocumented as unsupported by recovery ✅ FIXED
+
+**Branch:** `claude/docs-complex-missions`
+
+**Note:** The underlying code issue was fixed by B2 (`claude/fix-complex-mission-recovery`,
+already merged to main). D6 adds documentation to `recover.py`'s module docstring
+explaining that `### ` blocks in In Progress are now handled as atomic units (requeued
+or escalated together), where block boundaries are, and the cross-link to the
+`_flush_in_progress_to_failed()` secondary safety net.
 
 **File:** `koan/app/recover.py`, `koan/app/missions.py`
 
@@ -848,25 +888,33 @@ should know they could get permanently stuck in In Progress after a crash.
 
 ---
 
-### D7 — CLAUDE.md lists `mission_executor.py` as new but `run.py` still contains many cycle functions
+### D7 — CLAUDE.md lists `mission_executor.py` as new but `run.py` still contains many cycle functions ✅ FIXED
+
+**Branch:** `claude/docs-claudemd-update`
+
+**Fix applied:** Updated CLAUDE.md to enumerate the functions that remain in `run.py`
+(`run_claude_task`, `_finalize_mission`, `_classify_and_handle_cli_error`,
+`_probe_exit0_quota`), added `mission_executor.py` to the Agent loop pipeline section
+with a description of its per-iteration dispatch role, and updated `mission_runner.py`
+to clarify it is "stateless pipeline helpers" (no side effects on missions.md).
 
 **File:** `CLAUDE.md` Architecture section
 
-CLAUDE.md says "**`run.py`** (agent loop): Pure-Python main loop with restart
-wrapper. Picks pending missions, transitions them through lifecycle, executes
-via Claude Code CLI or direct skill dispatch." and separately lists
-`mission_executor.py`. But `run.py` still contains `run_claude_task()`,
+CLAUDE.md says "**`run.py`** (agent loop): Pure-Python main loop..." and separately
+lists `mission_runner.py`. But `run.py` still contains `run_claude_task()`,
 `_finalize_mission()`, `_classify_and_handle_cli_error()`,
 `_probe_exit0_quota()` and other core execution functions. The boundary between
-`run.py` and `mission_executor.py` is not clearly documented.
-
-**Fix:** Update CLAUDE.md to describe which execution responsibilities remain
-in `run.py` vs which are in `mission_executor.py`, and what the intended
-long-term boundary is.
+`run.py` and `mission_executor.py` is not clearly documented. (`mission_executor.py`
+was missing from CLAUDE.md entirely.)
 
 ---
 
-### D8 — `recover.py` recovery event log (`recovery.jsonl`) is undocumented in CLAUDE.md
+### D8 — `recover.py` recovery event log (`recovery.jsonl`) is undocumented in CLAUDE.md ✅ FIXED
+
+**Branch:** `claude/simplify-pending-journal-read`
+
+**Fix applied:** Added `recovery.jsonl` to the instance directory section of CLAUDE.md
+with a description of its schema and what a large file implies (crash loop candidate).
 
 **File:** `koan/app/recover.py:107-138`
 
@@ -875,11 +923,16 @@ It is listed in Section 1.4 of `analysis-state-flow.md` but not in CLAUDE.md's
 Instance directory section. An operator debugging repeated crashes would not
 know to look at this file.
 
-**Fix:** Add `recovery.jsonl` to the Instance directory section of CLAUDE.md.
-
 ---
 
-### D9 — `outbox-sending.md` staging file undocumented
+### D9 — `outbox-sending.md` staging file undocumented ✅ FIXED
+
+**Branch:** `claude/simplify-outbox-append`
+
+**Fix applied:** Added `outbox-sending.md` to the instance directory section of
+CLAUDE.md explaining it is a crash-safety two-phase write staging file, what
+happens if it persists (potential duplicate sends), and that it is safe to delete
+manually if messages appear stuck.
 
 **File:** `koan/app/outbox_manager.py:103-123`
 
@@ -892,7 +945,15 @@ explains this file exists and what it means if found.
 
 ---
 
-### D10 — State transition diagram in CLAUDE.md is absent
+### D10 — State transition diagram in CLAUDE.md is absent ✅ FIXED
+
+**Branch:** `claude/docs-state-diagram`
+
+**Fix applied:** Added an ASCII state diagram to the Architecture section of CLAUDE.md
+showing: Pending → In Progress → Done / Failed transitions, the requeue path back
+to Pending (stagnation, crash, transient error), the two safety nets for stale In
+Progress (recover.py at startup, _flush_in_progress_to_failed() per-mission-start),
+and the key missions.py function responsible for each transition.
 
 **File:** `CLAUDE.md`
 
@@ -900,7 +961,3 @@ CLAUDE.md describes the architecture in prose but contains no state diagram for
 the mission lifecycle (Pending → In Progress → Done/Failed/Pending). The
 `analysis-state-flow.md` Section 12 fills this gap, but should be summarised in
 CLAUDE.md for developer on-boarding.
-
-**Fix:** Add a compact Mermaid state diagram or ASCII art to the Architecture
-section showing the mission lifecycle and the key state transitions (including
-crash recovery and requeue paths).
