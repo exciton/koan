@@ -89,7 +89,8 @@ Safety nets for stale In Progress at startup:
 ### Key modules (`koan/app/`)
 
 **Core data & config:**
-- **`missions.py`** — Single source of truth for `missions.md` parsing (sections: Pending / In Progress / Done; French equivalents also accepted). Missions can be tagged `[project:name]`. Provides explicit lifecycle transitions: `start_mission()` (Pending→In Progress with stale-flush sanity enforcement), `complete_mission()`, `fail_mission()`.
+- **`mission_store.py`** — Structured mission store (data/view split). `missions.json` is the canonical store; `missions.md` is a generated view. `MissionRecord` dataclass holds all lifecycle state as typed fields (id, text, status, project, timestamps, tags, complexity, crash_count). `MissionStore` provides: `load()` (with auto-migration from `missions.md` if JSON absent, and human-edit reconciliation on hash mismatch), `save()` (atomic JSON write then regenerate MD), `add()`, `find()`, `start()`, `complete()`, `fail()`, `requeue()`, `remove()`, `get_by_status()`, `flush_stale_in_progress()`, `reconcile_from_markdown()`, `generate_view()`. This eliminates the text-as-database-record anti-pattern.
+- **`missions.py`** — Markdown parser for `missions.md` (sections: Pending / In Progress / Done; French equivalents also accepted). Missions can be tagged `[project:name]`. Provides explicit lifecycle transitions: `start_mission()` (Pending→In Progress with stale-flush sanity enforcement), `complete_mission()`, `fail_mission()`. These string-transform functions remain for callers not yet migrated to the store.
 - **`projects_config.py`** — Project configuration loader for `projects.yaml`. `load_projects_config()`, `get_projects_from_config()`, `get_project_config()` (merged defaults + overrides), `get_project_auto_merge()`, `get_project_cli_provider()`, `get_project_models()`, `get_project_tools()`. Per-project overrides for CLI provider, model selection, and tool restrictions. `ensure_github_urls()` auto-populates `github_url` fields from git remotes at startup.
 - **`projects_migration.py`** — One-shot migration from env vars (`KOAN_PROJECTS`/`KOAN_PROJECT_PATH`) to `projects.yaml`. Runs at startup if `projects.yaml` doesn't exist.
 - **`utils.py`** — File locking (thread + file locks), config loading, atomic writes, `get_branch_prefix()`, `get_known_projects()` (projects.yaml > KOAN_PROJECTS), `koan_tmp_dir()` (per-uid scratch/lock dir)
@@ -205,7 +206,8 @@ Extensible command plugin system. Each skill lives in `skills/<scope>/<skill-nam
 ### Instance directory
 
 `instance/` (gitignored, copy from `instance.example/`) holds all runtime state:
-- `missions.md` — Task queue
+- `missions.json` — Canonical structured mission store (source of truth when present; auto-migrated from `missions.md` on first load)
+- `missions.md` — Generated Markdown view of the mission queue; do not write directly — use `MissionStore.save()` or the existing `modify_missions_file()` path
 - `outbox.md` — Bot → Telegram message queue (written atomically by `append_to_outbox()`)
 - `outbox-sending.md` — Staging file created by `OutboxManager` between reading `outbox.md` and sending to Telegram (crash-safety two-phase write). If the bridge crashes mid-send this file persists; `recover_staged()` re-sends it on restart. A stale `outbox-sending.md` on startup means the last send may have been duplicated — safe to delete manually if messages appear stuck.
 - `config.yaml` — Per-instance configuration (tools, auto-merge rules)
