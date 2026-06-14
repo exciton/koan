@@ -56,6 +56,35 @@ Two parallel processes run independently:
 
 Communication between processes happens through shared files in `instance/` with atomic writes (`utils.atomic_write()` using temp file + rename + `fcntl.flock()`). Exclusive process instances enforced via `pid_manager.py` (PID file + `fcntl.flock()`).
 
+### Mission lifecycle
+
+```
+                    ┌──────────────────────────────────────────────┐
+   Telegram / API   │              missions.md                      │
+   adds mission ──► │  Pending ──► In Progress ──► Done ✅          │
+                    │     ▲            │                            │
+                    │     │            ▼                            │
+                    │     │         Failed ❌                       │
+                    │     │         (with [flushed] if sanity       │
+                    │     │          flush fired in start_mission)  │
+                    └─────┼────────────────────────────────────────┘
+                          │ requeue_mission()  (TOP of Pending)
+                          │   ← stagnation retry (up to max_retry_on_stagnation)
+                          │   ← crash recovery  (up to MAX_RECOVERY_ATTEMPTS)
+                          │   ← transient error retry (once, via _maybe_retry_mission)
+
+Key transitions (all in missions.py):
+  start_mission()      Pending → In Progress  (+ [flushed] safety-flush of stale IP)
+  complete_mission()   In Progress → Done
+  fail_mission()       In Progress → Failed
+  requeue_mission()    In Progress/Failed → Pending (prepends to queue top)
+
+Safety nets for stale In Progress at startup:
+  recover.py               runs once per startup, moves stale IP back to Pending
+  _flush_in_progress_to_failed()  runs per-mission-start inside start_mission(),
+                           catches anything recover.py missed; marks Failed [flushed]
+```
+
 ### Key modules (`koan/app/`)
 
 **Core data & config:**
