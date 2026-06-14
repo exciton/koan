@@ -1133,6 +1133,13 @@ def _flush_in_progress_to_failed(content: str) -> str:
     Under normal operation this path never fires because recover.py moves
     stale In Progress entries back to Pending at startup. This is a second
     line of defence for edge cases recover.py misses (e.g. complex ### missions).
+
+    Relationship to crash recovery (two safety nets for the same scenario):
+    - ``recover.py`` runs once at startup, before the loop, and moves stale
+      In Progress missions back to *Pending* (with crash-recovery counting).
+    - This function runs per-mission, inside ``start_mission()``, and moves
+      whatever ``recover.py`` missed to *Failed*. When it fires, the caller
+      (``run._start_mission_in_file``) emits a WARNING so the flush is visible.
     """
     sections = parse_sections(content)
     stale = sections.get("in_progress", [])
