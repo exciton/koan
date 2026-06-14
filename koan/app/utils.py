@@ -1115,7 +1115,6 @@ def filter_diff_by_ignore(
     """
     import fnmatch
     import os
-    import re as _re
 
     if not diff:
         return diff, []
@@ -1127,8 +1126,8 @@ def filter_diff_by_ignore(
     compiled_regexes = []
     for pat in regex_patterns:
         try:
-            compiled_regexes.append(_re.compile(pat))
-        except _re.error as e:
+            compiled_regexes.append(re.compile(pat))
+        except re.error as e:
             print(
                 f"[utils] filter_diff_by_ignore: skipping malformed regex {pat!r}: {e}",
                 file=sys.stderr,
@@ -1136,7 +1135,7 @@ def filter_diff_by_ignore(
 
     # Split diff into file blocks. Each block starts with 'diff --git'.
     # Re-join the delimiter with the block that follows it.
-    raw_blocks = _re.split(r'(?=^diff --git )', diff, flags=_re.MULTILINE)
+    raw_blocks = re.split(r'(?=^diff --git )', diff, flags=re.MULTILINE)
 
     # If splitting yields <=1 block, the format is unexpected — return unchanged
     if len(raw_blocks) <= 1:
@@ -1163,7 +1162,7 @@ def filter_diff_by_ignore(
 
     kept_blocks = []
     skipped_files = []
-    _diff_git_re = _re.compile(r'^diff --git a/(.+) b/(.+)$', _re.MULTILINE)
+    _diff_git_re = re.compile(r'^diff --git a/(.+) b/(.+)$', re.MULTILINE)
 
     for block in raw_blocks:
         if not block.strip():

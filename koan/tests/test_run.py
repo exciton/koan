@@ -7028,7 +7028,7 @@ class TestRunIterationPaths:
             "_handle_skill_dispatch": MagicMock(
                 return_value=(False, plan.get("mission_title", ""))
             ),
-            "_start_mission_in_file": MagicMock(),
+            "_start_mission_in_file": MagicMock(return_value=True),
             "_finalize_mission": MagicMock(),
             "_notify": MagicMock(),
             "_notify_mission_end": MagicMock(),
@@ -7166,6 +7166,21 @@ class TestRunIterationPaths:
             mocks["_finalize_mission"].assert_called_once()
             mocks["_notify_mission_end"].assert_called_once()
             assert result is True
+
+    # --- start_mission transition failure aborts run ---
+
+    def test_start_mission_failure_aborts_execution(self, tmp_path):
+        """When _start_mission_in_file returns False, execution is aborted."""
+        plan = self._make_plan("mission", mission_title="implement feature X")
+        with self._patched_iteration(
+            tmp_path, plan,
+            _start_mission_in_file=MagicMock(return_value=False),
+        ) as mocks:
+            result = self._call(tmp_path)
+            mocks["_start_mission_in_file"].assert_called_once()
+            mocks["run_claude_task"].assert_not_called()
+            mocks["_finalize_mission"].assert_not_called()
+            assert result is False
 
     # --- Mission failure still finalizes ---
 

@@ -232,29 +232,94 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
         failed_bounds = boundaries.get("failed")
 
         # Classify and sort each candidate mission
-        recovered = []      # missions to move to Pending
+        recovered = []      # missions to move to Pending (simple items or full ### blocks)
         escalated = []      # missions to move to Failed
         remaining_in_progress = []
-        in_complex_mission = False
+        # pending.md context belongs to at most one mission (the one that was
+        # running when the process was interrupted). Consume it on first use so
+        # subsequent missions in the same In Progress block are not all marked
+        # "partial" — which would give them misleading "recovery context" status.
+        journal_available = has_pending_journal
+        complex_block_header: str = ""   # raw header line for current ### block
+        complex_block_lines: list = []   # all lines in the current ### block
+
+        def _append_escalated_entry(out: list, m: str) -> None:
+            """Append one escalated item to out, handling complex blocks (multi-line)."""
+            if "\n" in m:
+                block_lines = m.splitlines()
+                header = _strip_recovery_counter(block_lines[0]).rstrip().removeprefix("### ")
+                out.append(f"- ❌ needs_input: {header}")
+                out.extend(f"  {sub.rstrip()}" for sub in block_lines[1:])
+            else:
+                clean = _strip_recovery_counter(m).rstrip()
+                out.append(f"- ❌ needs_input: {clean.removeprefix('- ')}")
+
+        def _finalize_complex_block():
+            """Classify the collected complex mission block and dispatch it."""
+            nonlocal journal_available
+            if not complex_block_header:
+                return
+            header = complex_block_header.strip()
+            clean_title = _strip_recovery_counter(header).removeprefix("### ").strip()
+            has_checkpoint = False
+            if _read_cp is not None:
+                cp = _read_cp(instance_dir, clean_title)
+                has_checkpoint = cp is not None
+
+            state = classify_mission_state(
+                header,
+                has_pending_journal=journal_available,
+                has_checkpoint=has_checkpoint,
+            )
+            if journal_available and state == "partial":
+                journal_available = False
+
+            attempts = _get_recovery_attempts(header)
+
+            if dry_run:
+                print(f"[recover] [dry-run] mission={header!r:.60} state={state} "
+                      f"attempts={attempts} checkpoint={has_checkpoint}")
+                _log_recovery_event(instance_dir, header, state, "dry_run", attempts,
+                                    has_checkpoint=has_checkpoint)
+                remaining_in_progress.extend(complex_block_lines)
+                return
+
+            if state == "unrecoverable":
+                escalated.append("\n".join(complex_block_lines))
+                _log_recovery_event(instance_dir, header, state, "escalated", attempts,
+                                    has_checkpoint=has_checkpoint)
+            else:
+                # Convert ### block to - item: extract_next_pending() treats ### as
+                # project sub-headers in Pending, which would fragment the block on
+                # the next mission pick. Use - format so it's picked up as a unit.
+                dash_line = _set_recovery_attempts(f"- {clean_title}", attempts + 1)
+                recovered.append(dash_line)
+                recovered_mission_texts.append(clean_title)
+                _log_recovery_event(instance_dir, header, state, "recovered", attempts + 1,
+                                    has_checkpoint=has_checkpoint)
 
         for i in range(in_progress_start + 1, in_progress_end):
             line = lines[i]
             stripped = line.strip()
 
             if stripped.startswith("### "):
-                in_complex_mission = True
-                remaining_in_progress.append(line)
+                # Finalize any previous complex block before starting a new one
+                _finalize_complex_block()
+                complex_block_header = line
+                complex_block_lines = [line]
                 continue
 
             # Blank lines end the current complex mission block
             if stripped == "":
-                if in_complex_mission:
-                    in_complex_mission = False
+                if complex_block_header:
+                    _finalize_complex_block()
+                    complex_block_header = ""
+                    complex_block_lines = []
                 remaining_in_progress.append(line)
                 continue
 
-            if in_complex_mission:
-                remaining_in_progress.append(line)
+            if complex_block_header:
+                complex_block_lines.append(line)
                 continue
 
             if stripped.startswith("- ") and "~~" not in stripped:
@@ -266,12 +331,16 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
                     cp = _read_cp(instance_dir, clean_text)
                     has_checkpoint = cp is not None
 
-                # Classify this mission
+                # Classify this mission; journal context is single-use
                 state = classify_mission_state(
                     line,
-                    has_pending_journal=has_pending_journal,
+                    has_pending_journal=journal_available,
                     has_checkpoint=has_checkpoint,
                 )
+                # Once a mission claims the journal context, mark it consumed
+                if journal_available and state == "partial":
+                    journal_available = False
+
                 attempts = _get_recovery_attempts(line)
 
                 if dry_run:
@@ -299,10 +368,13 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
             else:
                 remaining_in_progress.append(line)
 
+        # Finalize any complex block that ends at the section boundary (no trailing blank line)
+        _finalize_complex_block()
+
         if not recovered and not escalated:
             return content
 
-        recovered_count = len(recovered)
+        recovered_count = len(recovered_mission_texts)
         escalated_missions = escalated
 
         # Rebuild file: recovered → Pending, escalated → Failed, rest stays
@@ -337,8 +409,7 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
                 new_lines.extend(orig_failed)
                 if escalated:
                     for m in escalated:
-                        clean = _strip_recovery_counter(m).rstrip()
-                        new_lines.append(f"- ❌ needs_input: {clean.removeprefix('- ')}")
+                        _append_escalated_entry(new_lines, m)
                     new_lines.append("")
 
         # If there's no Failed section but we have escalated missions, append one
@@ -347,8 +418,7 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
             new_lines.append("## Failed")
             new_lines.append("")
             for m in escalated:
-                clean = _strip_recovery_counter(m).rstrip()
-                new_lines.append(f"- ❌ needs_input: {clean.removeprefix('- ')}")
+                _append_escalated_entry(new_lines, m)
             new_lines.append("")
 
         return normalize_content("\n".join(new_lines) + "\n")
@@ -422,8 +492,10 @@ if __name__ == "__main__":
     count, escalated_lines = recover_missions(instance_dir, dry_run=dry_run)
 
     # Build escalated message list from current run only (not historical log)
-    escalated_msgs = [_strip_recovery_counter(m).strip().removeprefix("- ")[:80]
-                      for m in escalated_lines]
+    escalated_msgs = [
+        _strip_recovery_counter(m.split("\n")[0]).strip().removeprefix("### ").removeprefix("- ")[:80]
+        for m in escalated_lines
+    ]
 
     if count > 0 or has_pending or escalated_msgs:
         parts = []

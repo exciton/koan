@@ -162,7 +162,7 @@ def patched_run_iteration(prep_result, extra_patches=None):
         "app.run.run_claude_task": MagicMock(return_value=0),
         "app.run._run_preflight_check": MagicMock(return_value=False),
         "app.run._handle_skill_dispatch": MagicMock(return_value=(False, "test mission")),
-        "app.run._start_mission_in_file": MagicMock(),
+        "app.run._start_mission_in_file": MagicMock(return_value=True),
         "app.run._finalize_mission": MagicMock(),
         "app.run._notify": MagicMock(),
         "app.run._notify_mission_end": MagicMock(),

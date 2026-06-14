@@ -195,7 +195,7 @@ class TestRecoverComplexMissionFallback:
     """Cover L74 — complex mission ending with non-sub-item line."""
 
     def test_complex_mission_ends_with_non_subitem(self, instance_dir):
-        """Everything from ### header to next ### header (or section end) stays in-progress."""
+        """Everything from ### header to blank line is recovered as a unit."""
         from app.recover import recover_missions
         missions = instance_dir / "missions.md"
         missions.write_text(
@@ -210,8 +210,8 @@ class TestRecoverComplexMissionFallback:
             "## Done\n\n"
         )
         count, _ = recover_missions(str(instance_dir))
-        # All lines after ### are part of the complex mission — none recovered
-        assert count == 0
+        # The entire ### block (header + sub-items) is recovered as one unit
+        assert count == 1
 
 
 # ---------------------------------------------------------------------------

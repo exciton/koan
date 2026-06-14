@@ -159,37 +159,39 @@ class TestRecoverMissions:
         assert "Completed task" not in between
         assert "Another done" not in between
 
-    def test_skip_complex_mission(self, instance_dir):
-        """### header missions with sub-items are NOT recovered, even after blank lines."""
+    def test_recover_complex_mission_block(self, instance_dir):
+        """### header missions with sub-items ARE recovered as a unit to Pending."""
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(
                 in_progress=(
                     "### Complex Project\n"
                     "- ~~Step 1~~ done\n"
-                    "- Step 2 in progress\n"
+                    "- Step 2 active\n"
                     "- Step 3 todo\n"
                 )
             )
         )
 
         count, _ = recover_missions(str(instance_dir))
-        assert count == 0
+        assert count == 1
 
         content = missions.read_text()
         lines = content.splitlines()
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
-        done_idx = next(i for i, l in enumerate(lines) if "done" == l.strip().lstrip("#").strip().lower())
-        in_progress_section = "\n".join(lines[in_prog_idx + 1 : done_idx])
-        # Complex mission should still be in-progress
-        assert "Complex Project" in in_progress_section
-        assert "Step 2" in in_progress_section
+        # Use a regex-style check to find the ## Pending header line
+        pending_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## pending"))
+        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
+        pending_section = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        # Complex mission title recovered as - item (not ### block) so
+        # extract_next_pending() picks it up as a single mission, not fragments
+        assert "- Complex Project" in pending_section
+        assert "### Complex Project" not in pending_section
 
     def test_blank_line_ends_complex_block(self, instance_dir):
         """A blank line after complex mission sub-items ends the complex block.
 
-        Items after the blank line are treated as standalone simple missions
-        and should be recovered.
+        The complex block and the standalone mission after the blank line are
+        both recovered.
         """
         missions = instance_dir / "missions.md"
         missions.write_text(
@@ -205,14 +207,15 @@ class TestRecoverMissions:
         )
 
         count, _ = recover_missions(str(instance_dir))
-        # Step 3 follows a blank line — treated as a standalone mission, recovered
-        assert count == 1
+        assert count == 2
 
         content = missions.read_text()
         lines = content.splitlines()
         pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
+        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
         pending_section = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        # Both the complex project and Step 3 should be in Pending
+        assert "Complex Project" in pending_section
         assert "Step 3" in pending_section
 
     def test_two_complex_missions(self, instance_dir):
@@ -232,18 +235,22 @@ class TestRecoverMissions:
         )
 
         count, _ = recover_missions(str(instance_dir))
-        # Both complex missions should stay, nothing recovered
-        assert count == 0
+        assert count == 2
 
         content = missions.read_text()
-        assert "Complex Project" in content
-        assert "Another Complex" in content
+        # Both blocks should be in Pending now
+        lines = content.splitlines()
+        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
+        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
+        pending_section = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        assert "Complex Project" in pending_section
+        assert "Another Complex" in pending_section
 
     def test_simple_mission_after_complex_recovered(self, instance_dir):
         """A simple '- ' mission after a complex block (separated by blank line) IS recovered.
 
-        Blank lines end the complex mission block, so subsequent '- ' items
-        are treated as standalone simple missions and moved back to Pending.
+        Blank lines end the complex mission block, so the complex block and
+        subsequent '- ' items are both recovered.
         """
         missions = instance_dir / "missions.md"
         missions.write_text(
@@ -259,17 +266,16 @@ class TestRecoverMissions:
         )
 
         count, _ = recover_missions(str(instance_dir))
-        assert count == 1
+        assert count == 2
 
         content = missions.read_text()
         lines = content.splitlines()
         pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
+        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
         pending_section = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        # Both the complex block and the simple orphan task are in Pending
         assert "Simple orphan task" in pending_section
-        # Complex mission stays in-progress
-        in_progress_section = "\n".join(lines[in_prog_idx + 1 :])
-        assert "Complex Project" in in_progress_section
+        assert "Complex Project" in pending_section
 
     def test_removes_aucune_placeholder(self, instance_dir):
         """The (none) placeholder is removed from pending when missions are added."""
@@ -281,7 +287,7 @@ class TestRecoverMissions:
         content = missions.read_text()
         lines = content.splitlines()
         pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
+        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
         between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
         assert "(none)" not in between
         assert "Recover me" in between
@@ -735,6 +741,37 @@ class TestUnrecoverableEscalation:
         assert "needs_input" in content
         assert "Fix the bug" in content
 
+    def test_unrecoverable_complex_block_in_failed(self, instance_dir):
+        """Unrecoverable complex ### block: header appears in Failed, sub-items preserved."""
+        missions = instance_dir / "missions.md"
+        in_prog = (
+            f"### Fix auth [r:{MAX_RECOVERY_ATTEMPTS}]\n"
+            "- ~~Step 1~~ done\n"
+            "- Step 2 active\n"
+        )
+        missions.write_text(_missions(in_progress=in_prog))
+
+        count, escalated = recover_missions(str(instance_dir))
+        assert count == 0  # Not moved to Pending
+        assert len(escalated) == 1
+
+        content = missions.read_text()
+        assert "## Failed" in content
+        assert "needs_input" in content
+        # Header appears without ### prefix
+        assert "### Fix auth" not in content
+        assert "Fix auth" in content
+        # Sub-items preserved in Failed
+        assert "Step 1" in content
+        assert "Step 2" in content
+
+        # In Progress should be empty now
+        lines = content.splitlines()
+        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
+        failed_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## failed"))
+        in_prog_section = "\n".join(lines[in_prog_idx + 1 : failed_idx])
+        assert "Fix auth" not in in_prog_section
+
 
 # ---------------------------------------------------------------------------
 # JSONL recovery log
@@ -851,6 +888,34 @@ class TestRecoverPendingJournalTOCTOU:
 
         # Mission should still be recovered (as "dead", not "partial")
         assert count == 1
+
+
+class TestPendingJournalSingleUse:
+    """pending.md context should only be claimed by the first in-progress mission."""
+
+    def test_only_first_mission_gets_partial_state(self, instance_dir):
+        """With two stale in-progress missions, only the first is 'partial'."""
+        missions = instance_dir / "missions.md"
+        missions.write_text(_missions(in_progress="- Task A\n- Task B"))
+
+        pending_path = instance_dir / "journal" / "pending.md"
+        pending_path.parent.mkdir(parents=True, exist_ok=True)
+        pending_path.write_text("# Mission\n---\nsome progress\n")
+
+        log_path = instance_dir / "recovery.jsonl"
+        count, _ = recover_missions(str(instance_dir))
+
+        # Both missions should be recovered
+        assert count == 2
+
+        # Read audit log to check states
+        import json
+        events = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
+        by_mission = {e["mission"]: e["state"] for e in events}
+
+        # First mission claims the journal → partial; second is dead
+        assert by_mission.get("- Task A") == "partial"
+        assert by_mission.get("- Task B") == "dead"
 
 
 class TestDryRun:

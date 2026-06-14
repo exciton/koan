@@ -1757,17 +1757,36 @@ def _reset_usage_session(instance: str):
         log("error", f"Usage session reset failed: {e}")
 
 
-def _start_mission_in_file(instance: str, mission_title: str):
-    """Move mission from Pending to In Progress via locked write."""
+def _start_mission_in_file(instance: str, mission_title: str) -> bool:
+    """Move mission from Pending to In Progress via locked write.
+
+    Returns True if the transition was confirmed (mission visible in In Progress
+    after the write), False if the mission was not found or the transition could
+    not be verified. A False return is logged as a WARNING — the caller should
+    treat the mission as if it never started.
+    """
     try:
-        from app.missions import start_mission
+        from app.missions import parse_sections, start_mission
         from app.utils import modify_missions_file
         missions_path = Path(instance, "missions.md")
         if not missions_path.exists():
-            return
-        modify_missions_file(missions_path, lambda c: start_mission(c, mission_title))
+            return False
+        after = modify_missions_file(missions_path, lambda c: start_mission(c, mission_title))
+        in_progress = parse_sections(after).get("in_progress", [])
+        # Normalise for comparison: strip leading "- ", collapse whitespace
+        import re
+        clean_title = re.sub(r"\s+", " ", mission_title.strip())
+        for entry in in_progress:
+            entry_text = re.sub(r"\s+", " ", entry.strip().removeprefix("- "))
+            if clean_title in entry_text:
+                return True
+        log("warning", f"Mission transition unconfirmed — '{clean_title[:60]}' "
+            "not found in In Progress after start_mission(). "
+            "Possible text normalisation mismatch or race condition.")
+        return False
     except Exception as e:
         log("error", f"Could not start mission in missions.md: {e}")
+        return False
 
 
 def _update_mission_in_file(
