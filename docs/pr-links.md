@@ -476,3 +476,34 @@ same file.
 test_requeue_preserves_trailing_newline (exact newline contract),
 test_requeue_falls_back_to_failed_on_error (fallback still triggers when the shared append raises).
 ```
+
+---
+
+## S4 — Replace startup flag pair with a single _startup_phase
+
+**Title:** `refactor(run): replace startup flag pair with single _startup_phase`
+
+**Branch:** `claude/simplify-startup-phase`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/simplify-startup-phase?expand=1)
+
+**Body:**
+```
+## Problem
+run.py tracked first-iteration Telegram visibility with two booleans
+(_startup_notified, _boot_notified) whose semantics overlapped and were reset inconsistently.
+
+## Changes
+- Replace the pair with a single _startup_phase: "boot" → "resume" → "running"
+- run.py: _mark_startup_resume() downgrades running→resume on /resume and counter reset, but
+  preserves "boot" when no iteration has run yet (start-paused-then-resumed still gets boot
+  banners once)
+- mission_executor.py: derive is_boot_iteration (phase=="boot") and is_first_iteration
+  (phase in boot/resume) from the phase, then set "running"
+
+Behavior verified identical across normal boot, resume-after-boot, and resume-before-first-iteration.
+
+## Test
+TestStartupPhase (running→resume, boot preserved, resume idempotent); existing
+first-iteration/resume notification suites updated to drive the phase.
+```

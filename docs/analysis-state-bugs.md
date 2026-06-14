@@ -642,14 +642,33 @@ shared append raises).
 
 ---
 
-### S4 — Replace `_startup_notified` / `_boot_notified` dual flag pair with an enum
+### S4 — Replace `_startup_notified` / `_boot_notified` dual flag pair with an enum ✅ FIXED
+
+**Branch:** `claude/simplify-startup-phase`
+
+**Files:** `koan/app/run.py`, `koan/app/mission_executor.py`
 
 `run.py` maintains two booleans (`_startup_notified`, `_boot_notified`) to
 distinguish "first iteration since start" vs "first iteration after resume".
 Their semantics overlap and neither is reset consistently.
 
-**Suggested change:** Replace with a single `_startup_phase: Literal["boot", "resume", "running"]`
-state variable. Clearer semantics, fewer boolean combinations to reason about.
+**Fix applied:**
+Replaced the pair with a single `_startup_phase` state (`"boot"` → `"resume"` →
+`"running"`). The two booleans only ever held three valid combinations —
+(first+boot), (first only), (neither) — which map 1:1 to these phases.
+- `run.py`: initialised to `"boot"`; new `_mark_startup_resume()` helper
+  downgrades `running → resume` on `/resume` and counter reset, but **preserves
+  `"boot"`** when no iteration has run yet (start-paused-then-resumed still emits
+  boot banners exactly once — the edge case the old code handled via
+  `_boot_notified` never being reset).
+- `mission_executor.py`: derives `is_boot_iteration` (`phase == "boot"`) and
+  `is_first_iteration` (`phase in {"boot", "resume"}`), then sets `"running"`.
+
+Behavior verified identical across all three scenarios (normal boot, resume
+after a boot iteration, resume before the first iteration).
+
+Tests: `TestStartupPhase` (running→resume, boot preserved, resume idempotent);
+existing first-iteration/resume notification suites updated to drive the phase.
 
 ---
 
