@@ -186,6 +186,77 @@ Tests added for key stability across requeue cycles.
 
 ---
 
+## B6 — Unified retry cap; remove `[r:N]` tags; preserve counter in Failed
+
+**Title:** `refactor(retry): consolidate crash and stagnation counters; preserve in Failed state`
+
+**Branch:** `claude/fix-unified-retry-cap`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/fix-unified-retry-cap?expand=1)
+
+**Body:**
+```
+## Problem
+
+Two independent retry systems accumulated silently with no shared ceiling:
+- `[r:N]` tags embedded in mission text (missions.md) for crash-recovery, hardcoded max 3
+- `.stagnation-retries.json` for stagnation retries, max configurable
+
+A mission could cycle between stagnating and crashing indefinitely because:
+1. Neither counter knew about the other
+2. Any non-stagnation exit cleared the stagnation counter, resetting cross-system progress
+3. Counters were cleared immediately on escalation to Failed, so the human couldn't see why
+
+## Changes
+
+**Commit 1 — cross-system ceiling (`total_attempts`):**
+- Add `total_attempts` field to tracker entries; incremented by both stagnation requeues and
+  crash-recovery on requeue
+- New `max_total_retries` config key (default 0 = disabled) in `get_stagnation_config()` —
+  single operator knob across both systems
+- `clear_retry_count(clear_total=False)` preserves `total_attempts` across crash cycles
+- Both `classify_mission_state()` and `_finalize_mission` check combined cap
+
+**Commit 2 — unified storage (remove `[r:N]` from missions.md):**
+- Rename `.stagnation-retries.json` → `.mission-retries.json` with auto-migration
+- Add `crash_count` field alongside existing stagnation `count`
+- New `get_crash_count()` / `increment_crash_count()` API; `increment_crash_count()` also
+  increments `total_attempts`
+- New `max_crash_retries` config key (default 3) replaces hardcoded `MAX_RECOVERY_ATTEMPTS`
+- `classify_mission_state()` takes `crash_count: int` instead of parsing `[r:N]` from text
+- Remove `MAX_RECOVERY_ATTEMPTS`, `_get_recovery_attempts`, `_set_recovery_attempts` from
+  `recover.py`; keep `_strip_recovery_counter()` for backward-compat cleanup of old tags
+- Backward compat: legacy `[r:N]` tags in existing missions.md read for classification only;
+  never seeded to tracker; stripped on next write
+
+**Commit 3 — counter lifetime (preserve in Failed; clear on human retry):**
+- Counter is NOT cleared when stagnation cap is hit or mission escalated to Failed
+- Counter is cleared only when `_start_mission_in_file()` detects a cap was previously hit
+  (`stag_count >= max_retry` OR `crash_count >= max_crash_retries` OR `total >= max_total`),
+  signalling a deliberate human retry
+- Ongoing stagnation-retry requeus (count < cap) keep their counter intact
+- New `_clear_if_cap_hit()` helper encapsulates the conditional clear logic
+
+## Counter lifetime
+
+| Event | Counter action |
+|---|---|
+| Crash → Failed | preserve all |
+| Stagnation cap hit → Failed | preserve all |
+| Escalated unrecoverable → Failed | preserve all |
+| Stagnation retry requeue (count < cap) | preserve (cap still needs to fire) |
+| Mission success | full clear |
+| `start_mission()` with cap-hit counter | full clear (human deliberate retry) |
+
+## Test
+
+562 tests pass (6 pre-existing environment failures excluded).
+New: `TestCrashCount`, updated `TestRetryTracker`, `TestTotalAttempts`, `TestUnifiedRetryCap`,
+`TestClassifyMissionState`, `TestMigrationBackwardCompat`.
+```
+
+---
+
 ## B7 standalone — Single-use pending journal flag
 
 **Title:** `fix(recover): consume pending.md context for first mission only`
