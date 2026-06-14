@@ -6192,6 +6192,58 @@ class TestUpdateMissionInFile:
         assert "issues/15" in content.split("## Done")[1]
 
 
+class TestStartMissionSanityFlushLog:
+    """S1: a sanity flush during start_mission() is surfaced to operators."""
+
+    def test_stale_in_progress_is_flushed_and_logged(self, tmp_path):
+        from app.run import _start_mission_in_file
+        from app.missions import parse_sections
+
+        missions = tmp_path / "instance" / "missions.md"
+        missions.parent.mkdir(parents=True)
+        # A stale In Progress mission recover.py "missed", plus the one we start.
+        missions.write_text(
+            "# Missions\n\n## Pending\n\n- /plan new work\n\n"
+            "## In Progress\n\n- /plan leftover stale ▶(2026-01-01T00:00)\n\n"
+            "## Done\n"
+        )
+
+        with patch("app.run.log") as mock_log:
+            assert _start_mission_in_file(str(missions.parent), "/plan new work") is True
+
+        # The stale mission was flushed to Failed with a [flushed] tag...
+        sections = parse_sections(missions.read_text())
+        failed_text = "\n".join(sections["failed"])
+        assert "leftover stale" in failed_text
+        assert "[flushed]" in failed_text
+        # ...and the new mission is now In Progress.
+        assert "/plan new work" in "\n".join(sections["in_progress"])
+        # ...and a warning naming the flush was emitted.
+        warnings = [
+            c.args[1] for c in mock_log.call_args_list
+            if c.args and c.args[0] == "warning"
+        ]
+        assert any("Sanity flush" in w and "leftover stale" in w for w in warnings)
+
+    def test_no_log_when_in_progress_empty(self, tmp_path):
+        from app.run import _start_mission_in_file
+
+        missions = tmp_path / "instance" / "missions.md"
+        missions.parent.mkdir(parents=True)
+        missions.write_text(
+            "# Missions\n\n## Pending\n\n- /plan only work\n\n"
+            "## In Progress\n\n## Done\n"
+        )
+        with patch("app.run.log") as mock_log:
+            assert _start_mission_in_file(str(missions.parent), "/plan only work") is True
+
+        warnings = [
+            c.args[1] for c in mock_log.call_args_list
+            if c.args and c.args[0] == "warning"
+        ]
+        assert not any("Sanity flush" in w for w in warnings)
+
+
 # ---------------------------------------------------------------------------
 # Test: _run_iteration returns productive/idle boolean
 # ---------------------------------------------------------------------------

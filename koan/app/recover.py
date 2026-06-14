@@ -185,6 +185,13 @@ def recover_missions(instance_dir: str, dry_run: bool = False) -> tuple:
     Uses modify_missions_file() for atomic read-modify-write under exclusive lock,
     preventing race conditions with concurrent mission additions.
 
+    This is the *primary* crash-recovery safety net — it runs once at startup,
+    before the agent loop, and recovers to Pending. A second, narrower net lives
+    in ``missions._flush_in_progress_to_failed`` (invoked per-mission by
+    ``start_mission()``): it sweeps anything this function misses (e.g. complex
+    ``###`` blocks) into Failed. If you are debugging a stale In Progress
+    mission, check both paths.
+
     Args:
         instance_dir: Path to instance directory.
         dry_run: If True, classify and log but do not modify missions.md.
