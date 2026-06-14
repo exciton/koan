@@ -38,7 +38,12 @@ from app.constants import IDLE_LOOP_BREATH_SECONDS
 from app.iteration_manager import plan_iteration
 from app.loop_manager import check_pending_missions, interruptible_sleep
 from app.pid_manager import acquire_pidfile, release_pidfile
-from app.restart_manager import check_restart, clear_restart, RESTART_EXIT_CODE
+from app.restart_manager import (
+    check_restart,
+    clear_restart,
+    RESTART_EXIT_CODE,
+    RESTART_RUN_FILE,
+)
 from app.run_log import (  # noqa: F401 — re-exported for backward compat
     _ANSI_RESET,
     _CATEGORY_COLORS,
@@ -57,7 +62,6 @@ from app.signals import (
     PAUSE_FILE,
     PROJECT_FILE,
     RESET_COUNTER_FILE,
-    RESTART_FILE,
     SHUTDOWN_FILE,
     ABORT_FILE,
     STATUS_FILE,
@@ -591,7 +595,7 @@ def _startup_delay(koan_root: str) -> None:
     - ``startup_delay`` is set to ``0``.
 
     The delay is interrupted early if any lifecycle signal appears
-    (.koan-pause, .koan-stop, .koan-shutdown, .koan-restart).
+    (.koan-pause, .koan-stop, .koan-shutdown, .koan-restart-run).
     """
     from app.utils import load_config
 
@@ -616,8 +620,10 @@ def _startup_delay(koan_root: str) -> None:
         time.sleep(min(tick, delay - elapsed))
         elapsed += tick
 
-        # Any lifecycle signal → break out
-        for sig in (PAUSE_FILE, STOP_FILE, SHUTDOWN_FILE, RESTART_FILE):
+        # Any lifecycle signal → break out. Use the runner's own restart marker
+        # (RESTART_RUN_FILE) — the legacy combined .koan-restart is deprecated
+        # and no longer written (S5).
+        for sig in (PAUSE_FILE, STOP_FILE, SHUTDOWN_FILE, RESTART_RUN_FILE):
             if Path(koan_root, sig).exists():
                 log("koan", f"Signal detected during startup delay ({sig}), proceeding.")
                 return
