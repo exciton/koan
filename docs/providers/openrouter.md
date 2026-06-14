@@ -205,6 +205,36 @@ projects:
 Leaving a project's `models` empty makes the CLI send no `--model`, so CCR falls
 back to its `Router.default`.
 
+#### How model selection actually works
+
+CCR — not the wrapper — picks the model. It reads the `model` field of each
+incoming request and decides:
+
+- **Contains a comma** (`provider,model`, e.g. `openrouter,qwen/qwen3.7-plus`) →
+  CCR treats it as an **explicit override** and routes there verbatim.
+- **Plain name** (`sonnet`, `haiku`, `claude-sonnet-4-6`, …) → CCR **ignores your
+  intent** and applies its own `Router` table (`default` / `background` / `think`
+  / `longContext`).
+
+Verified live against this setup:
+
+| What the CLI sends to CCR | What CCR routes to |
+|---|---|
+| `openrouter,minimax/minimax-m3` | `minimax/minimax-m3` ✅ exact |
+| `openrouter,qwen/qwen3.7-plus` | `qwen/qwen3.7-plus` ✅ exact |
+| `claude-sonnet-4-6` (what `--model sonnet` becomes) | whatever CCR's Router picks ❌ not yours |
+
+So the takeaways:
+
+- **Always use the `openrouter,<slug>` form** in Koan's `models:` config. Plain
+  tier names get hijacked by CCR's Router.
+- **The wrapper sets no model env vars.** You do *not* need `ANTHROPIC_MODEL` or
+  `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` — `--model` already reaches CCR and
+  takes precedence, and explicit slugs make tier-alias remapping pointless.
+- **Background/small calls** (Claude Code's auxiliary haiku-tier requests for
+  summaries, etc.) don't carry your `--model`. Control them with CCR's
+  `Router.background` (already set above) — not the wrapper.
+
 ### 5. Pin the autonomous mode
 
 On pay-per-token OpenRouter there is no subscription "quota %", so Koan's
