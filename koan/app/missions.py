@@ -1235,6 +1235,14 @@ def requeue_mission(content: str, mission_text: str) -> str:
     the case where quota is detected after _finalize_mission already moved
     the mission to Failed.
 
+    Queue position — TOP, not bottom (intentional): the requeued mission is
+    inserted as the *first* item in Pending, unlike :func:`insert_mission`
+    which appends at the bottom (FIFO). This is deliberate — a mission that
+    was interrupted mid-flight (auth/quota pause, recoverable error) should
+    resume *before* unstarted work rather than going to the back of the
+    queue. Operators who see a requeued item jump ahead of other Pending
+    missions after a quota pause are observing this by design.
+
     Returns content unchanged if the mission is not found in either section.
     """
     needle = mission_text.strip()
