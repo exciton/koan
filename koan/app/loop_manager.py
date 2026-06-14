@@ -189,6 +189,9 @@ def _drain_ci_queue_during_sleep(instance_dir: str, elapsed: float):
 # --- Pending.md creation ---
 
 
+_RECOVERY_CONTEXT_SENTINEL = "## Recovery Context (from previous interrupted run)"
+
+
 def create_pending_file(
     instance_dir: str,
     project_name: str,
@@ -198,6 +201,10 @@ def create_pending_file(
     mission_title: str = "",
 ) -> str:
     """Create the pending.md progress journal file for a run.
+
+    Preserves any checkpoint recovery context that recover.py injected into
+    pending.md at startup. Without this, the context written by
+    _inject_checkpoint_context() would be overwritten before Claude reads it.
 
     Args:
         instance_dir: Path to instance directory.
@@ -212,7 +219,10 @@ def create_pending_file(
     """
     pending_path = Path(instance_dir) / "journal" / "pending.md"
     journal_dir = Path(instance_dir) / "journal" / datetime.now().strftime("%Y-%m-%d")
-    journal_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        journal_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        log.warning("Failed to create journal dir %s: %s", journal_dir, exc)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -231,6 +241,19 @@ Mode: {mode}
 
 ---
 """
+
+    # Preserve checkpoint recovery context written by recover.py at startup.
+    # It starts with a known sentinel so we can reliably detect its presence.
+    try:
+        existing = pending_path.read_text()
+        if _RECOVERY_CONTEXT_SENTINEL in existing:
+            recovery_start = existing.index(_RECOVERY_CONTEXT_SENTINEL)
+            content = content.rstrip() + "\n\n" + existing[recovery_start:].strip() + "\n"
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        log.warning("Could not read existing pending.md for recovery context: %s", exc)
+
     atomic_write(pending_path, content)
     return str(pending_path)
 
