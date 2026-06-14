@@ -672,15 +672,41 @@ existing first-iteration/resume notification suites updated to drive the phase.
 
 ---
 
-### S5 — Signal file proliferation: consolidate restart signals
+### S5 — Signal file proliferation: consolidate restart signals ✅ FIXED
+
+**Branch:** `claude/simplify-restart-signals`
+
+**Files:** `koan/app/restart_manager.py`, `koan/app/api/routes_admin.py`,
+`koan/app/dashboard.py`, `koan/app/run.py`
 
 Three restart-related files exist: `.koan-restart-bridge`, `.koan-restart-run`,
 `.koan-restart` (legacy combined). The legacy file is written alongside the
 two new ones but not consumed by anything. It accumulates on disk.
 
-**Suggested change:** Remove the legacy `.koan-restart` write from
-`restart_manager.request_restart()`. If backward compat is needed, document
-that it is deprecated and stop writing it.
+**Investigation revised the premise — and surfaced a latent bug.** The legacy
+`.koan-restart` is not merely unconsumed: `check_restart()` is only ever called
+with `target="run"` or `target="bridge"` (each consumer polls its own marker),
+yet the **REST API** (`/v1/restart`, `/v1/update`) and the **dashboard**
+(`/api/agent/restart`) signalled restarts by touching *only* the legacy file —
+so those endpoints were **silent no-ops** (no consumer ever saw the request).
+The dashboard's own `/api/config/restart` already did it correctly via
+`request_restart()`.
+
+**Fix applied (proper fix, not the literal "stop writing" suggestion):**
+- `routes_admin` `/v1/restart` + `/v1/update`, dashboard `/api/agent/restart`:
+  now call `request_restart()` so both per-consumer markers are written and the
+  restart actually fires.
+- `request_restart()` writes only the two live markers; the deprecated legacy
+  `.koan-restart` is no longer written.
+- `run._startup_delay()` wakes on `.koan-restart-run` instead of the dead legacy
+  file.
+- `restart_manager` keeps the `target=None → .koan-restart` read mapping (for any
+  out-of-tree poller) documented as deprecated read-only compat.
+
+Tests updated across `test_restart_manager`, `test_restart`, `test_api_admin`,
+`test_dashboard`, `test_startup_delay` to assert both consumer markers are
+written and the legacy file is not. `check_restart`/`clear_restart`
+(`target="run"`/`"bridge"`) behavior unchanged.
 
 ---
 

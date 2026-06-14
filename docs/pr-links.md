@@ -507,3 +507,38 @@ Behavior verified identical across normal boot, resume-after-boot, and resume-be
 TestStartupPhase (running→resume, boot preserved, resume idempotent); existing
 first-iteration/resume notification suites updated to drive the phase.
 ```
+
+---
+
+## S5 — Route all restart triggers through request_restart(); drop legacy marker
+
+**Title:** `fix(restart): route all restart triggers through request_restart; drop legacy marker`
+
+**Branch:** `claude/simplify-restart-signals`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/simplify-restart-signals?expand=1)
+
+**Body:**
+```
+## Problem
+The legacy combined .koan-restart marker was written "for backward compat" but nothing reads it
+— both consumers poll their own per-process marker (.koan-restart-run / .koan-restart-bridge).
+Worse, the REST API (/v1/restart, /v1/update) and the dashboard /api/agent/restart endpoint
+signalled restarts by touching ONLY that dead legacy file, so those endpoints were silent no-ops
+(the run loop and bridge never saw the request). The dashboard's /api/config/restart already did
+it correctly via request_restart().
+
+## Changes
+- routes_admin /v1/restart + /v1/update, dashboard /api/agent/restart: call request_restart() so
+  both per-consumer markers are written and the restart actually fires
+- request_restart() writes only the two live markers; the deprecated legacy .koan-restart is no
+  longer written
+- run._startup_delay() wakes on .koan-restart-run instead of the dead legacy file
+- restart_manager: keep target=None → .koan-restart read mapping for any out-of-tree poller,
+  documented as deprecated read-only compat
+
+## Test
+Tests updated across test_restart_manager, test_restart, test_api_admin, test_dashboard,
+test_startup_delay to assert both consumer markers are written and the legacy file is not.
+check_restart/clear_restart (target="run"/"bridge") behavior unchanged.
+```
