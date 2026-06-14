@@ -450,3 +450,29 @@ TOCTOU window between the reads. (The daemon startup path only ever did the sing
 test_passed_has_pending_overrides_file_read (supplied True classifies partial with no file on
 disk), test_default_none_still_reads_file (daemon path still reads from disk).
 ```
+
+---
+
+## S3 — Route OutboxManager.requeue() through append_to_outbox()
+
+**Title:** `refactor(outbox): route requeue() through append_to_outbox`
+
+**Branch:** `claude/simplify-outbox-append`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/simplify-outbox-append?expand=1)
+
+**Body:**
+```
+## Problem
+OutboxManager.requeue() duplicated the open/flock/write pattern that
+utils.append_to_outbox() already implements — two slightly different append paths for the
+same file.
+
+## Changes
+- requeue() delegates to append_to_outbox() (preserving the trailing newline), leaving a
+  single locked write path. The outbox-failed.md fallback on error is retained.
+
+## Test
+test_requeue_preserves_trailing_newline (exact newline contract),
+test_requeue_falls_back_to_failed_on_error (fallback still triggers when the shared append raises).
+```

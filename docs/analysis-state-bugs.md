@@ -619,15 +619,26 @@ Used by: `_mission_key()` in stagnation, `mission_history.py`, dedup checks.
 
 ---
 
-### S3 — Consolidate outbox writing into a single function
+### S3 — Consolidate outbox writing into a single function ✅ FIXED
+
+**Branch:** `claude/simplify-outbox-append`
+
+**Files:** `koan/app/outbox_manager.py`
 
 `append_to_outbox()` is called from both `run.py` and `awake.py` (via
 `notify.py`). The `OutboxManager.requeue()` method uses raw `open(outbox_file, "a")`
 without going through `append_to_outbox`. This creates two slightly different
 append paths for the same file.
 
-**Suggested change:** Have `requeue()` call `append_to_outbox()` rather than
-duplicating the open/flock/write pattern.
+**Fix applied:**
+`OutboxManager.requeue()` now delegates to `utils.append_to_outbox()` (preserving
+the trailing newline so the requeued message stays on its own line), leaving a
+single locked open/write path for outbox.md. The `outbox-failed.md` fallback on
+error is retained.
+
+Tests: `test_requeue_preserves_trailing_newline` (exact newline contract),
+`test_requeue_falls_back_to_failed_on_error` (fallback still triggers when the
+shared append raises).
 
 ---
 
