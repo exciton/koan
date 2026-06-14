@@ -1815,9 +1815,14 @@ def _update_mission_in_file(
     the mission text could not be matched in Pending/In Progress). A False
     return means the mission is still in the queue and will be re-picked —
     callers should surface this rather than let it loop silently.
+
+    History trimming is intentionally NOT done here (B12). Pruning old
+    Done/Failed entries is a separate maintenance concern run as its own
+    locked step (:func:`_prune_missions_history`) after the move commits, so
+    a pruning bug can never corrupt or roll back the finalization itself.
     """
     try:
-        from app.missions import complete_mission, fail_mission, prune_completed_sections
+        from app.missions import complete_mission, fail_mission
         from app.utils import modify_missions_file
         missions_path = Path(instance, "missions.md")
         if not missions_path.exists():
@@ -1834,19 +1839,51 @@ def _update_mission_in_file(
 
         def tracked(content):
             before[0] = content
-            result = transform(content)
-            result, _ = prune_completed_sections(result)
-            return result
+            return transform(content)
 
         after = modify_missions_file(missions_path, tracked)
         if before[0] is not None and after == before[0]:
             log("warning", f"Mission not found (no change): {mission_title[:80]}")
             return False
+        # Move committed — trim history as a decoupled, best-effort step.
+        _prune_missions_history(instance)
         return True
     except Exception as e:
         label = "fail" if failed else "complete"
         log("error", f"Could not {label} mission in missions.md: {e}")
         return False
+
+
+def _prune_missions_history(instance: str) -> None:
+    """Trim old Done/Failed entries from missions.md as a standalone step.
+
+    Decoupled from mission finalization (B12): runs as its own locked
+    read-modify-write so a pruning error cannot corrupt or roll back the
+    Done/Failed move that just committed. Uses the missions lock (unlike the
+    startup-time :func:`app.startup_manager.prune_missions_done`, which is
+    safe to run unlocked only because nothing else writes during startup) so
+    it cannot race the bridge inserting new missions. Best-effort: any error
+    is logged and swallowed.
+    """
+    try:
+        from app.missions import prune_completed_sections
+        from app.utils import modify_missions_file
+        missions_path = Path(instance, "missions.md")
+        if not missions_path.exists():
+            return
+
+        pruned = [0]
+
+        def _transform(content):
+            new_content, count = prune_completed_sections(content)
+            pruned[0] = count
+            return new_content
+
+        modify_missions_file(missions_path, _transform)
+        if pruned[0] > 0:
+            log("health", f"Pruned {pruned[0]} old Done/Failed items from missions.md")
+    except Exception as e:
+        log("error", f"Missions history pruning failed: {e}")
 
 
 def _requeue_mission_in_file(instance: str, mission_title: str):
