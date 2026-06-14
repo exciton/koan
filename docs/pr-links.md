@@ -283,3 +283,45 @@ one interrupted run.
 ## Test
 Added `TestPendingJournalSingleUse` verifying second mission gets "dead" state.
 ```
+
+---
+
+## B11 — Report found-status from `complete_mission`/`fail_mission`; fix silent no-op
+
+**Title:** `fix(missions): report found-status from complete/fail; fix silent no-op`
+
+**Branch:** `claude/fix-finalize-mission-telemetry`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/fix-finalize-mission-telemetry?expand=1)
+
+**Body:**
+```
+## Problem
+
+`complete_mission()` / `fail_mission()` return content unchanged when the mission is absent
+from Pending and In Progress, with no signal to the caller. `run.py`'s
+`_update_mission_in_file()` then inferred success by comparing content before and after the
+locked write — but `prune_completed_sections()` runs unconditionally on that path, so an
+oversized Done/Failed section makes the content differ even on a genuine no-op. Result: an
+absent mission was wrongly reported as moved (returning True), masking a stuck mission that
+re-dispatches on every loop.
+
+## Changes
+
+- `missions._move_pending_to_section()` now returns a `(content, found: bool)` tuple
+- New `complete_mission_checked()` / `fail_mission_checked()` expose the found flag;
+  `complete_mission()` / `fail_mission()` keep their `str` return as thin wrappers, so no
+  existing caller or test changes
+- `run._update_mission_in_file()` captures found-status via a closure flag (the same pattern
+  `insert_pending_mission()` already uses) and bases its WARNING + bool return on it —
+  decoupled from the pruning side effect
+
+## Test
+
+968 related tests pass. New:
+- `TestMissionCheckedVariants` — found=True/False across Pending, In Progress, and absent;
+  cause_tag preserved; wrappers equal the checked variant's content
+- `test_not_found_returns_false_even_when_pruning_changes_content` — regression proving an
+  absent mission reports False even when pruning mutates the file (the exact false-positive
+  the old before/after comparison produced)
+```

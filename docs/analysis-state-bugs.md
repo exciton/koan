@@ -450,9 +450,11 @@ top-of-queue insertion and why it is intentional.
 
 ---
 
-#### B11 — No telemetry when `complete_mission()` / `fail_mission()` silently finds nothing
+#### B11 — No telemetry when `complete_mission()` / `fail_mission()` silently finds nothing ✅ FIXED
 
-**Files:** `koan/app/missions.py:1054-1058`
+**Branch:** `claude/fix-finalize-mission-telemetry`
+
+**Files:** `koan/app/missions.py`, `koan/app/run.py`, `koan/tests/test_missions.py`, `koan/tests/test_run.py`
 
 **Problem:**
 `_move_pending_to_section()` returns the content unchanged if the mission is
@@ -460,9 +462,27 @@ not found in Pending or In Progress. The caller never knows whether the
 transition happened. Silent no-ops here mask data corruption or race
 conditions.
 
-**Fix:**
-Add a boolean return value (`True` if transition occurred, `False` if not found)
-and have `run.py`'s `_update_mission_in_file()` log a WARNING when `False`.
+Worse, `run.py`'s `_update_mission_in_file()` inferred success by comparing
+content *before* and *after* the locked write. Because
+`prune_completed_sections()` runs unconditionally on that path, an oversized
+Done/Failed section makes the content differ even on a genuine no-op — so an
+absent mission was wrongly reported as moved (returning `True`), masking a
+stuck mission that re-dispatches on every loop.
+
+**Fix applied:**
+- `_move_pending_to_section()` now returns a `(content, found: bool)` tuple
+- New `complete_mission_checked()` / `fail_mission_checked()` expose the found
+  flag; `complete_mission()` / `fail_mission()` keep their `str` return as thin
+  wrappers (no caller/test churn)
+- `_update_mission_in_file()` captures found-status via a closure flag (the same
+  pattern `insert_pending_mission()` uses) and bases its WARNING + `bool` return
+  on it — decoupled from the pruning side effect
+
+<details>
+<summary>PR description</summary>
+
+See `docs/pr-links.md` — B11 section.
+</details>
 
 ---
 
