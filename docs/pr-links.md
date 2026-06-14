@@ -542,3 +542,34 @@ Tests updated across test_restart_manager, test_restart, test_api_admin, test_da
 test_startup_delay to assert both consumer markers are written and the legacy file is not.
 check_restart/clear_restart (target="run"/"bridge") behavior unchanged.
 ```
+
+---
+
+## S2 — Single canonical mission-identity function
+
+**Title:** `refactor(missions): add canonical_mission_key as single mission-identity source`
+
+**Branch:** `claude/simplify-canonical-mission-key`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/simplify-canonical-mission-key?expand=1)
+
+**Body:**
+```
+## Problem
+stagnation_monitor._mission_key carried its own _STRIP_FOR_KEY_RE for deriving a stable mission
+identity (strip timestamps + [r:N] + [complexity:X] + "- "). There was no shared canonical
+function for "stable mission identity".
+
+## Changes
+- Add missions.canonical_mission_key() as the single source of truth.
+- stagnation_monitor._mission_key hashes its output — the SHA-256 is byte-identical, so existing
+  stagnation/crash trackers keep matching.
+- Deliberately NOT folded in (different concerns, would change behavior): mission_history.
+  _normalize_key (strips project tag for cross-project dedup) and recover._strip_recovery_counter
+  (strips only [r:N], keeps timestamps — display helper). Both get a comment pointing at the
+  canonical function.
+
+## Test
+TestCanonicalMissionKey; test_golden_hash_unchanged (locks the sha256 so future drift can't
+silently orphan trackers); test_delegates_to_canonical_mission_key.
+```

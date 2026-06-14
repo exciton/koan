@@ -605,7 +605,11 @@ Failed with `[flushed]`; silent when In Progress is empty.
 
 ---
 
-### S2 — Unify the "mission key" concept across stagnation and recovery counters
+### S2 — Unify the "mission key" concept across stagnation and recovery counters ✅ FIXED
+
+**Branch:** `claude/simplify-canonical-mission-key`
+
+**Files:** `koan/app/missions.py`, `koan/app/stagnation_monitor.py`, `koan/app/mission_history.py`
 
 Both `stagnation_monitor._mission_key` and `recover.py._strip_recovery_counter`
 deal with extracting a stable identity from mission text. There should be a
@@ -616,6 +620,27 @@ single canonical function (e.g., `missions.canonical_mission_key(text)`) that:
 4. Strips the `- ` prefix
 
 Used by: `_mission_key()` in stagnation, `mission_history.py`, dedup checks.
+
+**Fix applied — with a scope correction.** Added
+`missions.canonical_mission_key()` (steps 1–4 above) as the single source of
+truth for stable mission identity, and had `stagnation_monitor._mission_key`
+hash its output instead of carrying its own `_STRIP_FOR_KEY_RE`. The SHA-256 is
+**byte-identical**, so existing stagnation/crash trackers keep matching — locked
+in by a golden-hash regression test.
+
+The other two functions named in the suggestion were **deliberately not folded
+in**, because they strip intentionally different things and unifying them would
+change behavior:
+- `mission_history._normalize_key` strips the **project tag** (cross-project
+  dedup) — `canonical_mission_key` keeps it (project is identity-bearing).
+- `recover._strip_recovery_counter` strips **only `[r:N]`** and keeps timestamps
+  (it's a display/cleanup helper, not an identity key).
+Both gained a comment pointing at `canonical_mission_key` so the canonical
+function is discoverable without conflating the three concerns.
+
+Tests: `TestCanonicalMissionKey` (strips lifecycle/recovery/complexity, keeps
+project tag); `test_golden_hash_unchanged` + `test_delegates_to_canonical_mission_key`
+guard against hash drift that would orphan trackers.
 
 ---
 
