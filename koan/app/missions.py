@@ -187,6 +187,40 @@ def strip_all_lifecycle_markers(text: str) -> str:
     return text.rstrip()
 
 
+# Markers that vary across a mission's lifecycle but do not change its identity:
+# lifecycle timestamps (⏳ ▶ ✅/❌), the [r:N] crash-recovery counter, and the
+# [complexity:X] classifier tag. Stripping them yields a key that is stable
+# across requeue and crash-recovery cycles.
+_CANONICAL_KEY_STRIP_RE = re.compile(
+    r"\s*⏳\([^)]*\)"               # ⏳(queued-timestamp)
+    r"|\s*▶\([^)]*\)"               # ▶(started-timestamp)
+    r"|\s*[✅❌]\s*\([^)]*\)"       # ✅/❌ (completed-timestamp)
+    r"|\s*\[r:\d+\]"                # [r:N] crash-recovery counter
+    r"|\s*\[complexity:[^\]]*\]"    # [complexity:X] classifier tag
+)
+
+
+def canonical_mission_key(text: str) -> str:
+    """Return a stable identity string for a mission, independent of lifecycle.
+
+    Strips lifecycle timestamps (⏳ ▶ ✅ ❌), the ``[r:N]`` crash-recovery
+    counter, the ``[complexity:X]`` classifier tag, and a leading ``"- "`` so the
+    same logical mission maps to the same key across requeue and crash-recovery
+    cycles. This is the single source of truth for stable mission identity (S2);
+    ``stagnation_monitor._mission_key`` hashes its output.
+
+    Note: ``[project:X]`` tags are intentionally *kept* — two missions with the
+    same text but different projects are distinct. (Distinct from
+    ``mission_history._normalize_key``, which strips the project tag, and
+    ``recover._strip_recovery_counter``, which strips only ``[r:N]`` for display.
+    Those serve narrower purposes and are deliberately not folded in here.)
+    """
+    clean = _CANONICAL_KEY_STRIP_RE.sub("", text).strip()
+    if clean.startswith("- "):
+        clean = clean[2:].strip()
+    return clean
+
+
 def _normalize_now_flag(text: str) -> str:
     """Normalize Unicode dash variants of --now to ASCII --now.
 
