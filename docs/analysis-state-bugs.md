@@ -242,9 +242,11 @@ All 415 existing tests pass (1 pre-existing root-permission test excluded).
 
 ---
 
-#### B6 — Two independent retry systems accumulate silently; combined limit undocumented
+#### B6 — Two independent retry systems accumulate silently; combined limit undocumented ✅ FIXED
 
-**Files:** `koan/app/recover.py:36`, `koan/app/stagnation_monitor.py:55`
+**Branch:** `claude/fix-unified-retry-cap`
+
+**Files:** `koan/app/stagnation_monitor.py`, `koan/app/recover.py`, `koan/app/run.py`, `koan/app/config.py`
 
 **Problem:**
 There are two separate retry counters:
@@ -259,11 +261,35 @@ These counters are independent and have no cross-awareness. A mission can:
 Neither counter is reset when the other fires. There is no global "give up on
 this mission" threshold.
 
-**Fix (short term):** Fix B1 first — this automatically makes the stagnation
-cap work as intended and bounds the combined retry total.
+**Fix applied:**
+- Added `total_attempts` field to stagnation tracker entries (`.stagnation-retries.json`)
+- `increment_retry_count()` (stagnation) also increments `total_attempts`
+- New `increment_total_attempts()` function called by crash-recovery on requeue
+- New `get_total_attempts()` exposes the combined count
+- `clear_retry_count(clear_total=False)` clears stagnation count on non-success without resetting `total_attempts` — preserves cross-system cap across crash cycles
+- New `max_total_retries` config key (default 0 = disabled) in `get_stagnation_config()`
+- Both `classify_mission_state()` and the stagnation requeue path in `run.py` check `max_total_retries` against `total_attempts`
 
-**Fix (long term):** Consider a unified "total_attempts" counter that resets
-only on genuine success, giving operators a single knob.
+<details>
+<summary>PR description template</summary>
+
+**Title:** `refactor(retry): add unified total_attempts cap across stagnation and crash-recovery`
+
+**Body:**
+
+## Problem
+Two independent retry systems (stagnation counter in `.stagnation-retries.json` and crash-recovery `[r:N]` in missions.md) accumulated independently with no shared ceiling. A mission could cycle between stagnating (clearing the stagnation counter on crash) and crashing indefinitely before human escalation.
+
+## Changes
+- `stagnation_monitor`: add `total_attempts` field to tracker entries, incremented by both stagnation requeues and new `increment_total_attempts()` (called by crash-recovery)
+- `stagnation_monitor`: `clear_retry_count(clear_total=False)` preserves `total_attempts` across crash-recovery cycles; only genuine success uses `clear_total=True`
+- `config`: add `max_total_retries` (default 0 = disabled) to `get_stagnation_config()` — single operator knob
+- `run._finalize_mission`: check `max_total_retries` before stagnation requeue; pass `clear_total=(exit_code==0)` on non-stagnation outcomes
+- `recover.py`: `classify_mission_state()` accepts `total_attempts` and `max_total_retries`; `recover_missions()` calls `increment_total_attempts()` per requeued mission
+
+## Test
+18 new tests: `TestRetryTracker`, new `TestTotalAttempts`, `TestUnifiedRetryCap`.
+</details>
 
 ---
 
