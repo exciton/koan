@@ -579,17 +579,29 @@ This fix is bundled in the `claude/fix-checkpoint-overwrite` (B3) branch commit.
 
 ---
 
-### S1 — Merge or cross-link the two crash-recovery systems
+### S1 — Merge or cross-link the two crash-recovery systems ✅ FIXED
 
-`recover.py` (startup, `[r:N]` in missions.md) and `_flush_in_progress_to_done`
+**Branch:** `claude/simplify-flush-crosslink`
+
+**Files:** `koan/app/recover.py`, `koan/app/missions.py`, `koan/app/run.py`
+
+`recover.py` (startup, `[r:N]` in missions.md) and `_flush_in_progress_to_failed`
 (inside `start_mission()`) are independent safety nets for the same scenario.
 Their interaction is not documented. Operators debugging stale In Progress
 missions must check both code paths.
 
-**Suggested change:** Add a comment at the top of `_flush_in_progress_to_done`
-pointing to `recover.py` and explaining when this path fires vs when `recover.py`
-fires. Ideally add a log line so operators can see in the logs that a flush
-occurred.
+**Fix applied:**
+- `recover.recover_missions()` docstring now cross-links forward to the
+  per-mission flush net and explains it is the primary (startup, → Pending) net.
+- `missions._flush_in_progress_to_failed()` docstring now cross-links back to
+  `recover.py` and notes the caller logs when it fires.
+- `run._start_mission_in_file()` captures the stale In Progress set inside the
+  lock and emits a WARNING naming the flushed missions whenever the sanity flush
+  actually fires — so a flush is now visible in the logs. `missions.py` stays
+  pure (logging lives at the call site, not in the parser).
+
+Tests: `TestStartMissionSanityFlushLog` — flush logged and mission moved to
+Failed with `[flushed]`; silent when In Progress is empty.
 
 ---
 

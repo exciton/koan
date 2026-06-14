@@ -389,3 +389,35 @@ separate locked write — the coupling, not the cadence, was the problem.
   intact (returns True, Done updated, history uncorrupted)
 - `test_prune_helper_is_noop_below_threshold` — small history left untouched
 ```
+
+---
+
+# State Simplifications (S-series)
+
+---
+
+## S1 — Cross-link the two crash-recovery safety nets; log sanity flush
+
+**Title:** `docs+log: cross-link crash-recovery safety nets; log sanity flush`
+
+**Branch:** `claude/simplify-flush-crosslink`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/simplify-flush-crosslink?expand=1)
+
+**Body:**
+```
+## Problem
+recover.py (startup, → Pending) and _flush_in_progress_to_failed (per-mission via
+start_mission(), → Failed) are independent safety nets for the same stale In Progress
+scenario, with no documented relationship and no visibility when the second net fires.
+
+## Changes
+- recover.recover_missions() docstring cross-links forward to the per-mission flush net
+- missions._flush_in_progress_to_failed() docstring cross-links back to recover.py
+- run._start_mission_in_file() captures stale In Progress inside the lock and emits a WARNING
+  naming the flushed missions when the sanity flush fires (missions.py stays pure)
+
+## Test
+TestStartMissionSanityFlushLog — flush logged + mission moved to Failed with [flushed];
+no log when In Progress is empty.
+```
