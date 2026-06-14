@@ -1174,7 +1174,7 @@ def start_mission(content: str, mission_text: str) -> str:
     # Sanity enforcement: move any stale In Progress missions to Failed.
     # Under normal operation In Progress is always empty here because
     # recover.py runs at startup. This is a fallback for cases recover.py
-    # misses (e.g. complex ### missions — see analysis-state-bugs.md B2).
+    # misses (e.g. complex ### missions with nested headers).
     updated = _flush_in_progress_to_failed(updated)
 
     lines = updated.splitlines()
