@@ -421,3 +421,32 @@ scenario, with no documented relationship and no visibility when the second net 
 TestStartMissionSanityFlushLog — flush logged + mission moved to Failed with [flushed];
 no log when In Progress is empty.
 ```
+
+---
+
+## S6 — Single pending.md read in recover.py (close TOCTOU double-read)
+
+**Title:** `refactor(recover): single pending.md read; reuse caller value`
+
+**Branch:** `claude/simplify-pending-journal-read`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/simplify-pending-journal-read?expand=1)
+
+**Body:**
+```
+## Problem
+recover.py's CLI entry point read pending.md twice — once via check_pending_journal() for the
+summary message, then again inside recover_missions() for partial-state classification — with a
+TOCTOU window between the reads. (The daemon startup path only ever did the single internal read.)
+
+## Changes
+- recover_missions() gained an optional has_pending_journal kwarg. When the caller already read
+  pending.md, it passes the result in and the function skips its own read.
+- Default None preserves the daemon path (compute internally) and every existing caller/test
+  (return shape unchanged).
+- CLI main() reads once via check_pending_journal() and hands the value down.
+
+## Test
+test_passed_has_pending_overrides_file_read (supplied True classifies partial with no file on
+disk), test_default_none_still_reads_file (daemon path still reads from disk).
+```

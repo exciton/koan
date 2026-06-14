@@ -654,7 +654,11 @@ that it is deprecated and stop writing it.
 
 ---
 
-### S6 — `check_pending_journal()` and `has_pending_journal` in `recover.py` are not TOCTOU-safe
+### S6 — `check_pending_journal()` and `has_pending_journal` in `recover.py` are not TOCTOU-safe ✅ FIXED
+
+**Branch:** `claude/simplify-pending-journal-read`
+
+**Files:** `koan/app/recover.py`
 
 `check_pending_journal()` reads `pending.md` (returns True/False), then later
 `recover_missions()` reads it again inside `_recover_transform()`. Between these
@@ -662,8 +666,22 @@ two reads, `run.py` could create a new `pending.md` (if it started before
 `recover_missions()` completed, which should not happen in normal startup
 sequencing but could during tests). The double-read is redundant.
 
-**Suggested change:** Remove the standalone `check_pending_journal()` call from
-the startup flow and rely solely on the read inside `_recover_transform()`.
+Note on scope: the double-read happens only in recover.py's CLI entry point
+(`python3 recover.py`). The daemon startup path (`startup_manager` →
+`recover_crashed_missions` → `recover_missions`) never calls
+`check_pending_journal()` — it only does the single internal read.
+
+**Fix applied:**
+`recover_missions()` gained an optional `has_pending_journal` kwarg. When a
+caller has already read `pending.md`, it passes the result in and the function
+skips its own read — collapsing the CLI path to a single read and closing the
+TOCTOU window. The default (`None`) preserves the daemon path (compute
+internally) and every existing caller/test (return shape unchanged). The CLI
+`main()` now reads once via `check_pending_journal()` and hands the value down.
+
+Tests: `test_passed_has_pending_overrides_file_read` (supplied `True` classifies
+`partial` with no file on disk), `test_default_none_still_reads_file` (daemon
+path still reads from disk).
 
 ---
 
