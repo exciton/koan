@@ -1772,12 +1772,12 @@ def _start_mission_in_file(instance: str, mission_title: str) -> bool:
         if not missions_path.exists():
             return False
         after = modify_missions_file(missions_path, lambda c: start_mission(c, mission_title))
-        in_progress = parse_sections(after).get("in_progress", []) if after else []
+        in_progress = parse_sections(after).get("in_progress", [])
         # Normalise for comparison: strip leading "- ", collapse whitespace
-        import re as _re
-        clean_title = _re.sub(r"\s+", " ", mission_title.strip())
+        import re
+        clean_title = re.sub(r"\s+", " ", mission_title.strip())
         for entry in in_progress:
-            entry_text = _re.sub(r"\s+", " ", entry.strip().removeprefix("- "))
+            entry_text = re.sub(r"\s+", " ", entry.strip().removeprefix("- "))
             if clean_title in entry_text:
                 return True
         log("warning", f"Mission transition unconfirmed — '{clean_title[:60]}' "
