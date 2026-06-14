@@ -36,15 +36,22 @@ When ``missions.json`` does not exist yet, :meth:`MissionStore.load` calls
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import hashlib
 import json
 import re
+import threading
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
+
+# Module-level in-process lock (mirrors _MISSIONS_LOCK in utils.py).
+# Held alongside the file lock so threads within the same process do not
+# race on the JSON store.
+_STORE_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -696,6 +703,122 @@ class MissionStore:
     # Migration (classmethod)
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Queue-manipulation helpers
+    # ------------------------------------------------------------------
+
+    def get_pending_at(self, index: int) -> Optional["MissionRecord"]:
+        """Return the *index*-th pending record (0-based), or None."""
+        pending = self.get_by_status("pending")
+        if 0 <= index < len(pending):
+            return pending[index]
+        return None
+
+    def reorder_pending(self, from_idx: int, to_idx: int) -> bool:
+        """Move a pending record from *from_idx* to *to_idx* (both 0-based).
+
+        Indices reference positions within the pending sub-list only.
+
+        Returns:
+            ``True`` if the move was applied, ``False`` if either index is
+            out of range or they are equal.
+        """
+        pending = self.get_by_status("pending")
+        if from_idx == to_idx:
+            return False
+        if not (0 <= from_idx < len(pending) and 0 <= to_idx < len(pending)):
+            return False
+
+        record = pending[from_idx]
+        self._records.remove(record)
+
+        # Re-find position of to_idx in the updated list
+        new_pending = self.get_by_status("pending")
+        # Determine where to_idx lands in the overall _records list
+        if to_idx < len(new_pending):
+            target = new_pending[to_idx]
+            insert_at = self._records.index(target)
+        else:
+            # Append after the last pending record
+            non_pending_idx = next(
+                (i for i, r in enumerate(self._records) if r.status != "pending"),
+                len(self._records),
+            )
+            insert_at = non_pending_idx
+
+        self._records.insert(insert_at, record)
+        return True
+
+    def edit(self, old_text: str, new_text: str) -> bool:
+        """Replace the text of a pending record.
+
+        Args:
+            old_text: Current mission text (lifecycle-marker-agnostic lookup).
+            new_text: New clean text (no lifecycle markers).
+
+        Returns:
+            ``True`` if the record was found and updated, ``False`` otherwise.
+        """
+        record = self.find(old_text)
+        if record is None or record.status != "pending":
+            return False
+        from app.missions import canonical_mission_key
+        record.text = canonical_mission_key(new_text) or new_text.strip()
+        return True
+
+    def cancel(self, text: str) -> bool:
+        """Remove a *pending* record (does not affect in_progress/done/failed).
+
+        Args:
+            text: Mission text used to locate the record.
+
+        Returns:
+            ``True`` if the pending record was found and removed.
+        """
+        record = self.find(text)
+        if record is None or record.status != "pending":
+            return False
+        self._records.remove(record)
+        return True
+
+    def set_complexity(self, text: str, tier: str) -> bool:
+        """Set the complexity field on a pending record.
+
+        Args:
+            text: Mission text used to locate the record.
+            tier: Complexity tier string (e.g. ``"medium"``).
+
+        Returns:
+            ``True`` if the record was found and updated.
+        """
+        record = self.find(text)
+        if record is None:
+            return False
+        record.complexity = tier
+        return True
+
+    def prune(self, done_cap: int = _DONE_CAP, failed_cap: int = _FAILED_CAP) -> int:
+        """Trim old done/failed records from the store so the JSON does not grow
+        without bound.
+
+        Keeps the most recent *done_cap* done records and *failed_cap* failed
+        records (matching the view caps used by :meth:`generate_view`).
+
+        Returns:
+            Count of records removed.
+        """
+        removed = 0
+        for status, cap in (("done", done_cap), ("failed", failed_cap)):
+            group = self.get_by_status(status)
+            for r in group[cap:]:
+                self._records.remove(r)
+                removed += 1
+        return removed
+
+    # ------------------------------------------------------------------
+    # Migration (classmethod)
+    # ------------------------------------------------------------------
+
     @classmethod
     def _migrate_from_markdown(cls, instance_dir: str) -> "MissionStore":
         """Seed a new store by parsing the existing ``missions.md``.
@@ -750,6 +873,42 @@ class MissionStore:
         # Persist the migrated store immediately
         store.save()
         return store
+
+
+# ---------------------------------------------------------------------------
+# Public convenience: locked load→mutate→save transaction
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def locked_store(instance_dir: str) -> Generator[MissionStore, None, None]:
+    """Context manager for an atomic load → mutate → save transaction.
+
+    Acquires both the in-process thread lock and the per-instance file lock,
+    then yields a freshly loaded :class:`MissionStore`.  On clean exit the
+    store is saved; on exception the save is skipped so the on-disk state is
+    left unchanged.
+
+    Usage::
+
+        with locked_store(instance_dir) as store:
+            store.start("Fix bug")
+
+    This is the preferred entry point for all callers that previously used
+    ``modify_missions_file()``.
+    """
+    store = MissionStore(instance_dir)
+    lock_path = store._lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with _STORE_LOCK:
+        with open(lock_path, "w") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                store = MissionStore.load(instance_dir)
+                yield store
+                store.save()
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------
