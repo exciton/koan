@@ -351,3 +351,41 @@ but was undocumented and surprised operators who saw queue ordering change after
 ## Test
 Documentation-only change; behaviour unchanged. Existing requeue tests pass.
 ```
+
+---
+
+## B12 — Decouple missions.md history pruning from finalization
+
+**Title:** `refactor(run): decouple missions.md history pruning from finalization`
+
+**Branch:** `claude/fix-prune-decoupling`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/fix-prune-decoupling?expand=1)
+
+**Body:**
+```
+## Problem
+`prune_completed_sections()` ran inside the same locked read-modify-write that moves a mission
+to Done/Failed (`_update_mission_in_file`). A pruning bug or misconfiguration could silently
+mutate or corrupt history during the finalization write — two separate concerns coupled into
+one transform, with the finalization result depending on pruning succeeding.
+
+## Changes
+- Extracted pruning into `_prune_missions_history()`: a standalone, locked, best-effort step
+  run *after* the move commits. The finalization write now does only the mission move.
+- The helper uses the missions lock (via `modify_missions_file`) so it cannot race the bridge
+  inserting new missions — unlike the startup-time `startup_manager.prune_missions_done()`,
+  which is safe unlocked only because nothing else writes during startup.
+- A pruning error is logged and swallowed, leaving the committed move intact.
+
+Pruning still runs per-finalization (missions.md stays bounded during long sessions), but as a
+separate locked write — the coupling, not the cadence, was the problem.
+
+## Test
+`TestPruneDecoupledFromFinalization`:
+- `test_finalization_triggers_history_prune` — oversized Failed section still trimmed to
+  failed_keep after a completion
+- `test_prune_failure_does_not_break_finalization` — a pruning RuntimeError leaves the move
+  intact (returns True, Done updated, history uncorrupted)
+- `test_prune_helper_is_noop_below_threshold` — small history left untouched
+```

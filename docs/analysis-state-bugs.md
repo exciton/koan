@@ -491,9 +491,11 @@ See `docs/pr-links.md` — B11 section.
 
 ---
 
-#### B12 — `prune_completed_sections()` is called inline in `_update_mission_in_file()`
+#### B12 — `prune_completed_sections()` is called inline in `_update_mission_in_file()` ✅ FIXED
 
-**Files:** `koan/app/run.py` `_update_mission_in_file()`
+**Branch:** `claude/fix-prune-decoupling`
+
+**Files:** `koan/app/run.py`, `koan/tests/test_run.py`
 
 **Problem:**
 Pruning Done/Failed history is a side effect of mission finalization. If
@@ -501,9 +503,26 @@ pruning fails or is misconfigured, it silently modifies history during a
 `fail_mission()` call, making debugging harder. History trimming and mission
 finalization are separate concerns.
 
-**Fix (low priority):** Extract pruning into a scheduled maintenance step
-(e.g., once per session at startup or a dedicated post-mission step) rather
-than coupling it to the finalization path.
+**Fix applied:**
+Extracted pruning into `_prune_missions_history()` — a standalone, **locked**,
+best-effort step run *after* the Done/Failed move commits, rather than inside
+the finalization transform:
+- The finalization write (`_update_mission_in_file`) now does only the mission
+  move; its success no longer depends on pruning.
+- `_prune_missions_history()` uses the missions lock (via `modify_missions_file`)
+  so it cannot race the bridge inserting new missions — unlike the existing
+  startup-time `startup_manager.prune_missions_done()`, which is safe unlocked
+  only because nothing else writes during startup.
+- A pruning error is logged and swallowed, leaving the committed move intact.
+
+Note: pruning still runs per-finalization (so missions.md stays bounded during
+long sessions), but as a separate locked write — the coupling, not the cadence,
+was the problem.
+
+Tests: `TestPruneDecoupledFromFinalization` —
+`test_finalization_triggers_history_prune` (oversized Failed still trimmed),
+`test_prune_failure_does_not_break_finalization` (pruning `RuntimeError` leaves
+the move intact and history uncorrupted), `test_prune_helper_is_noop_below_threshold`.
 
 ---
 
