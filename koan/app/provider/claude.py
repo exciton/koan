@@ -1,5 +1,6 @@
 """Claude Code CLI provider implementation."""
 
+import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.provider.base import CLIProvider
@@ -11,7 +12,7 @@ class ClaudeProvider(CLIProvider):
     name = "claude"
 
     def binary(self) -> str:
-        return "claude"
+        return os.environ.get("KOAN_CLAUDE_CLI_PATH", "").strip() or "claude"
 
     def supports_session_resume(self) -> bool:
         return True

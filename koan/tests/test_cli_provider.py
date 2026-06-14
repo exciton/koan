@@ -42,7 +42,8 @@ class TestPackageStructure:
         assert "Bash" in CLAUDE_TOOLS
         assert hasattr(CLIProvider, "build_command")
 
-    def test_import_from_claude_module(self):
+    def test_import_from_claude_module(self, monkeypatch):
+        monkeypatch.delenv("KOAN_CLAUDE_CLI_PATH", raising=False)
         from app.provider.claude import ClaudeProvider
         assert ClaudeProvider().binary() == "claude"
 
@@ -83,6 +84,20 @@ class TestClaudeProvider:
 
     def test_binary(self):
         assert self.provider.binary() == "claude"
+
+    def test_binary_custom_path(self, monkeypatch):
+        monkeypatch.setenv("KOAN_CLAUDE_CLI_PATH", "/usr/local/bin/my-claude-wrapper")
+        assert self.provider.binary() == "/usr/local/bin/my-claude-wrapper"
+
+    def test_binary_custom_path_empty_falls_back(self, monkeypatch):
+        monkeypatch.setenv("KOAN_CLAUDE_CLI_PATH", "  ")
+        assert self.provider.binary() == "claude"
+
+    def test_binary_custom_path_in_build_command(self, monkeypatch):
+        monkeypatch.setenv("KOAN_CLAUDE_CLI_PATH", "/opt/bin/claude-proxy")
+        cmd = self.provider.build_command(prompt="hello")
+        assert cmd[0] == "/opt/bin/claude-proxy"
+        assert cmd[1:] == ["-p", "hello"]
 
     def test_name(self):
         assert self.provider.name == "claude"

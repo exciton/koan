@@ -119,6 +119,24 @@ projects:
 
 ## Advanced Configuration
 
+### Custom CLI Binary
+
+You can point Koan at a custom Claude-compatible binary instead of the
+default `claude` command. Set `KOAN_CLAUDE_CLI_PATH` in your `.env`:
+
+```bash
+KOAN_CLAUDE_CLI_PATH=/path/to/my-claude-wrapper
+```
+
+The custom binary must accept the same CLI interface as `claude`
+(e.g., `my-wrapper --model <model> -p "prompt"`). This is useful for:
+
+- Using a custom `ANTHROPIC_BASE_URL` via a wrapper script
+- Adding default arguments or environment variables
+- Proxying through a custom API endpoint
+
+When unset or empty, Koan uses the standard `claude` command from PATH.
+
 ### MCP (Model Context Protocol) Servers
 
 Claude Code supports MCP servers for extended capabilities (browser,
