@@ -438,31 +438,30 @@ models:
 
   # Claude provider overrides (uncomment to customize):
   # claude:
-  #   mission: ""              # Main mission execution
-  #   chat: ""                 # Chat responses
+  #   mission: "opus"          # Main mission execution
+  #   chat: "haiku"            # Chat responses
   #   lightweight: "haiku"     # Low-cost calls
   #   fallback: "sonnet"       # Fallback when primary is overloaded
-  #   review_mode: ""          # Override model for REVIEW mode
-  #   reflect: ""              # Model for review reflection pass
+  #   review_mode: "sonnet"    # Override model for REVIEW mode
+  #   reflect: "sonnet"        # Model for review reflection pass
 
   # Codex (OpenAI) provider overrides (uncomment to customize):
   # codex:
-  #   mission: "gpt-5.3-codex"      # complex implementation
-  #   chat: "gpt-5.5"               # general discussion / planning
-  #   lightweight: "gpt-5.5"        # simple tasks if cost is acceptable
-  #   fallback: ""                   # empty = use provider default
-  #   review_mode: "gpt-5.3-codex"  # serious code review
-  #   reflect: "gpt-5.5"            # summarize / reason about result
+  #   mission: "gpt-5.5"            # complex implementation
+  #   chat: "gpt-5.4"               # general discussion / planning
+  #   lightweight: "gpt-5.4-min"    # simple tasks if cost is acceptable
+  #   fallback: "gpt-5.4"           # empty = use provider default
+  #   review_mode: "gpt-5.5"        # serious code review
+  #   reflect: "gpt-5.4"            # summarize / reason about result
 
   # Ollama Launch provider overrides (uncomment to customize):
   # ollama-launch:
-  #   mission: "qwen2.5-coder:14b"   # main mission execution
-  #   chat: "qwen2.5-coder:14b"      # chat responses
-  #   lightweight: "qwen2.5-coder:7b" # low-cost calls
-  #   fallback: ""                    # empty = use provider default
-  #   review_mode: "qwen2.5-coder:14b"
-  #   reflect: "qwen2.5-coder:7b"
-
+  #   mission: "kimi-k2.7:cloud"         # main mission execution
+  #   chat: "glm-5:cloud"                # chat responses
+  #   lightweight: "minimax-m2.5:cloud"  # low-cost calls
+  #   fallback: "minimax-m2.5:cloud"     # empty = use provider default
+  #   review_mode: "glm-5:cloud"
+  #   reflect: "glm-5:cloud"
 # Branch cleanup — automatic deletion of merged branches during git sync
 # Every git_sync_interval iterations, Kōan detects merged branches (both
 # regular merges via git ancestry and squash/rebase merges via GitHub API)
