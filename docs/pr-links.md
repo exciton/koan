@@ -325,3 +325,29 @@ re-dispatches on every loop.
   absent mission reports False even when pruning mutates the file (the exact false-positive
   the old before/after comparison produced)
 ```
+
+---
+
+## B10 — Document `requeue_mission()` top-of-queue insertion
+
+**Title:** `docs(missions): document requeue_mission top-of-queue insertion`
+
+**Branch:** `claude/fix-requeue-priority-docs`
+
+[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/fix-requeue-priority-docs?expand=1)
+
+**Body:**
+```
+## Problem
+`requeue_mission()` inserts the recovered mission at the TOP of Pending, while `insert_mission()`
+appends at the bottom (FIFO). Quota/auth-requeued missions therefore jump ahead of all other
+pending work. This is intentional — interrupted work should resume before unstarted missions —
+but was undocumented and surprised operators who saw queue ordering change after a quota pause.
+
+## Changes
+- Added a "Queue position — TOP, not bottom (intentional)" paragraph to the `requeue_mission()`
+  docstring, contrasting it with `insert_mission()`'s FIFO append and explaining the rationale
+
+## Test
+Documentation-only change; behaviour unchanged. Existing requeue tests pass.
+```

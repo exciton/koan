@@ -431,9 +431,11 @@ not for other normalisation differences), or by edge cases in
 
 ---
 
-#### B10 — `requeue_mission()` inserts at top of Pending queue (undocumented priority behavior)
+#### B10 — `requeue_mission()` inserts at top of Pending queue (undocumented priority behavior) ✅ FIXED
 
-**Files:** `koan/app/missions.py:1254-1261`
+**Branch:** `claude/fix-requeue-priority-docs`
+
+**Files:** `koan/app/missions.py`
 
 **Problem:**
 `requeue_mission()` inserts the re-queued mission at the TOP of the Pending
@@ -445,8 +447,11 @@ This is intentional (you want the interrupted work to resume immediately) but
 is not documented and surprises operators who see queue ordering change
 unexpectedly after a quota pause.
 
-**Fix:** Add a docstring note to `requeue_mission()` explaining the
-top-of-queue insertion and why it is intentional.
+**Fix applied:**
+Added a "Queue position — TOP, not bottom (intentional)" paragraph to the
+`requeue_mission()` docstring contrasting it with `insert_mission()`'s FIFO
+append and explaining why interrupted work resumes ahead of unstarted missions.
+Behaviour is unchanged — this is a documentation-only fix.
 
 ---
 
