@@ -66,8 +66,32 @@ from app.conversation_history import (
 )
 from app.signals import HEARTBEAT_FILE, PAUSE_FILE, STOP_FILE
 from app.utils import (
+    atomic_write,
     parse_project as _parse_project,
 )
+
+# Path where the Telegram polling offset is persisted across restarts.
+_OFFSET_FILE = INSTANCE_DIR / ".telegram-offset.json"
+
+
+def _load_offset() -> int | None:
+    """Load the last persisted Telegram polling offset, or None if absent."""
+    try:
+        import json
+        data = json.loads(_OFFSET_FILE.read_text())
+        v = data.get("offset")
+        return int(v) if v is not None else None
+    except (FileNotFoundError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _save_offset(offset: int) -> None:
+    """Persist the Telegram polling offset to disk (best-effort)."""
+    try:
+        import json
+        atomic_write(_OFFSET_FILE, json.dumps({"offset": offset}))
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -693,10 +717,16 @@ def handle_message(text: str):
 
 
 def _check_group_chat_mode(provider) -> None:
-    """Detect group chats and warn about Telegram Bot Privacy Mode.
+    """Detect group chats and verify the bot can actually read every message.
 
-    In groups, bots with privacy mode enabled (the default) only receive
-    /commands, @mentions, and replies — not regular messages.
+    In groups, bots with Telegram Privacy Mode enabled (the default) only
+    receive /commands, @mentions, and replies — not regular messages. A bot can
+    read *every* message only if privacy mode is disabled
+    (``can_read_all_group_messages``) **or** the bot is a group administrator.
+
+    This probes both via the Bot API. When the bot is blocked, it warns loudly
+    (log + a message into the group itself) so the cause of an apparently
+    "ignored" chat is obvious instead of silent.
     """
     import requests
 
@@ -704,16 +734,66 @@ def _check_group_chat_mode(provider) -> None:
         return
     try:
         api_base = provider.get_api_base()
-        resp = requests.get(f"{api_base}/getChat", params={"chat_id": provider.get_channel_id()}, timeout=5)
+        chat_id = provider.get_channel_id()
+        resp = requests.get(f"{api_base}/getChat", params={"chat_id": chat_id}, timeout=5)
         data = resp.json()
         if not data.get("ok"):
             log("warn", f"getChat failed: {data.get('description', 'unknown')}")
             return
-        chat = data.get("result", {})
-        chat_type = chat.get("type", "")
-        if chat_type in ("group", "supergroup"):
-            log("init", f"Chat type: {chat_type} — group mode active")
-            log("init", "TIP: Disable Bot Privacy Mode via @BotFather (/setprivacy → Disable) to receive all group messages")
+        chat_type = data.get("result", {}).get("type", "")
+        if chat_type not in ("group", "supergroup"):
+            return
+
+        log("init", f"Chat type: {chat_type} — group mode active")
+
+        # The bot receives every message only if privacy mode is disabled OR it
+        # is a group admin. Probe getMe (privacy flag + bot id), then — only if
+        # still needed — getChatMember (admin status).
+        can_read_all = False
+        bot_id = None
+        try:
+            me = requests.get(f"{api_base}/getMe", timeout=5).json()
+            if me.get("ok"):
+                result = me.get("result", {})
+                bot_id = result.get("id")
+                can_read_all = bool(result.get("can_read_all_group_messages"))
+        except Exception as e:
+            log("warn", f"getMe failed: {e}")
+
+        is_admin = False
+        if not can_read_all and bot_id is not None:
+            try:
+                member = requests.get(
+                    f"{api_base}/getChatMember",
+                    params={"chat_id": chat_id, "user_id": bot_id},
+                    timeout=5,
+                ).json()
+                if member.get("ok"):
+                    status = member.get("result", {}).get("status", "")
+                    is_admin = status in ("administrator", "creator")
+            except Exception as e:
+                log("warn", f"getChatMember failed: {e}")
+
+        if can_read_all or is_admin:
+            log("init", "Group mode: bot can read all messages ✓")
+            return
+
+        # Blocked: privacy mode on and not an admin → plain messages never arrive.
+        log("warn", "Privacy Mode is ON — bot only sees /commands, @mentions, and replies in this group")
+        log("warn", "Fix: @BotFather /setprivacy → Disable then re-add the bot, OR promote the bot to admin")
+        try:
+            provider.send_message(
+                "⚠️ I can't see regular messages in this group because Telegram "
+                "Privacy Mode is enabled.\n\n"
+                "To let me reply to every message (like a 1:1 chat):\n"
+                "1. Message @BotFather → /setprivacy → select me → Disable, then "
+                "remove and re-add me to this group.\n"
+                "   — or —\n"
+                "2. Promote me to administrator in this group.\n\n"
+                "Until then I only respond to /commands, @mentions, and replies."
+            )
+        except Exception as e:
+            log("warn", f"Failed to send privacy-mode warning: {e}")
     except Exception as e:
         log("warn", f"Group chat detection failed: {e}")
 
@@ -830,7 +910,9 @@ def _bridge_loop():
             f"GitHub webhook receiver failed to start: {e}\n{traceback.format_exc()}")
 
     log("init", f"Polling every {POLL_INTERVAL}s (chat mode: fast reply)")
-    offset = None
+    offset = _load_offset()
+    if offset is not None:
+        log("init", f"Resuming Telegram polling from persisted offset {offset}")
     first_poll = True
 
     try:
@@ -855,6 +937,7 @@ def _bridge_loop():
                 # forever (see logs/awake.log KeyError: 'update_id').
                 if "update_id" in update:
                     offset = update["update_id"] + 1
+                    _save_offset(offset)
 
                 # Handle reaction updates
                 if "message_reaction" in update:

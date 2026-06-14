@@ -426,13 +426,15 @@ The master tracking issue then synthesizes the set with three optional sections:
 
 Plans include a **File Map** (table of every file to create/modify/test), **checkbox steps** within each phase (write test → implement → verify → commit), and **actual code blocks** in steps that change code. Each code block is wrapped in a collapsible `<details>` block so the plan stays scannable — readers see step descriptions first and expand the code only when needed. A built-in self-review pass checks spec coverage, scans for placeholders, and verifies name consistency across phases before output. Multi-subsystem ideas trigger a scope check suggesting separate plans per subsystem.
 
-- **Usage:** `/plan <idea>`, `/plan <project> <idea>`, `/plan <issue-url>` (iterate on existing)
+- **Usage:** `/plan [--iterations N] <idea>`, `/plan <project> <idea>`, `/plan <issue-url>` (iterate on existing)
 - **GitHub @mention:** `@koan-bot /plan <idea>` on an issue
+- **Option:** `--iterations N` (1-5, default 1) — Run N rounds of critique+refine. A critic identifies gaps and contradictions after each generation, then the plan is regenerated with that feedback. Only the final iteration is posted. Cost scales linearly (~5× tokens at `--iterations 3`).
 
 <details>
 <summary>Use cases</summary>
 
 - `/plan Add WebSocket support for real-time notifications` — Get a phased plan before writing any code
+- `/plan --iterations 3 Add WebSocket support` — Generate a plan with 3 rounds of critic-driven refinement
 - `/plan https://github.com/org/repo/issues/42` — Iterate on an existing issue's plan
 - `/plan https://myorg.atlassian.net/browse/PROJ-123` — Iterate on a Jira issue's plan
 - `/plan https://myorg.atlassian.net/browse/PROJ-123 branch:main` — Iterate with an explicit base-branch hint
@@ -731,14 +733,16 @@ Fetches the PR diff or issue description, compares it against the current main b
 
 **`/ci_check`** — Check and fix CI failures on a GitHub PR using Claude.
 
-- **Usage:** `/ci_check <pr-url>`
+- **Usage:** `/ci_check <pr-url>` or `/ci_check --enable` / `/ci_check --disable`
 
-Usually auto-triggered when CI fails after a `/rebase`, but can also be invoked manually. Fetches failure logs, checks out the PR branch, and runs Claude to attempt a fix. If the fix produces a commit, it force-pushes and re-enqueues the PR for CI monitoring.
+Usually auto-triggered when CI fails after a `/rebase`, but can also be invoked manually. Fetches failure logs, checks out the PR branch, and runs Claude to attempt a fix. If the fix produces a commit, it force-pushes and re-enqueues the PR for CI monitoring. Requires `ci_check.enabled: true` in config.yaml (the default).
 
 <details>
 <summary>Use cases</summary>
 
 - `/ci_check https://github.com/org/repo/pull/42` — Attempt to fix CI failures on a PR
+- `/ci_check --enable` — Enable CI check system via config
+- `/ci_check --disable` — Disable CI check system via config
 - Auto-injected by the CI queue when a post-rebase CI run fails
 </details>
 
@@ -974,14 +978,17 @@ When exploration is enabled, Kōan may autonomously explore a project's codebase
 - **Aliases:** `/exploration`
 
 **`/noexplore`** — Disable exploration for a project.
-- **Usage:** `/noexplore [project]`
+- **Usage:** `/noexplore [project|all]`
+
+Using `all` or `none` also sets the default for future projects added via `/add_project` or workspace discovery.
 
 <details>
 <summary>Use cases</summary>
 
 - `/explore webapp` — Let Kōan explore the webapp codebase
-- `/explore all` — Enable exploration for all projects
-- `/noexplore` — Disable exploration (focus on missions only)
+- `/explore all` — Enable exploration for all projects + set default
+- `/noexplore backend` — Disable exploration for one project
+- `/noexplore all` — Disable exploration for all projects + set default
 </details>
 
 ### Autoreview Mode
@@ -1157,6 +1164,7 @@ usage:
   session_token_limit: 500000 # Tokens per 5h window
   weekly_token_limit: 5000000 # Tokens per 7-day window
   budget_mode: session_only   # full | session_only | disabled
+  # unlimited_quota: true     # Provider has no quota limit (see below)
 
 # Tool restrictions (limit what the agent can do)
 tools:
@@ -1248,6 +1256,12 @@ See `instance.example/config.yaml` for all available options.
 `usage.budget_mode: disabled` turns off Koan's internal token-budget gating.
 Hard provider quota/session-limit errors are still detected from CLI output and
 will still pause and requeue missions.
+
+`usage.unlimited_quota: true` is a stronger override: it disables all proactive
+quota gating — budget-mode downgrades, burn-rate warnings, and preflight quota
+probes. Use this when your CLI provider has no metered quota (e.g. a self-hosted
+API proxy or a plan with no hard token limits). If the CLI actually fails with a
+quota error, Koan still detects it and pauses.
 
 **`/models`** (alias `/model`) — Show the resolved model configuration for the active CLI provider. Useful when debugging model-routing issues — displays which model wins for each of the 6 slots (`mission`, `chat`, `lightweight`, `fallback`, `review_mode`, `reflect`) after applying the full resolution chain: per-project `models:` → `models.{provider}:` → `models.default:` → built-in defaults.
 
@@ -1679,9 +1693,20 @@ Edit `instance/soul.md` to define Kōan's personality. This file shapes how Kōa
 
 The design principle: code is generic and open source; instance data (including personality) is private. Fork the repo, write your own soul.
 
+### CI Check System
+
+The CI check system monitors your PRs for CI failures and can automatically attempt fixes. It includes CI queue draining (after `/rebase`), auto-dispatch of fix missions, and the `/ci_check` skill. Enabled by default — disable to save tokens if you don't need CI monitoring.
+
+```yaml
+ci_check:
+  enabled: true              # Master switch (default: true)
+```
+
+When disabled, all CI-related automation is skipped: queue draining, CI dispatch, CI enqueue after rebase, and the `/ci_check` command returns an error.
+
 ### CI Dispatch
 
-Kōan can automatically create fix missions when CI fails on its own PRs. When enabled, each iteration checks open Koan-authored PRs for failing check runs and inserts a fix mission with the failure log snippet. Dedup prevents re-dispatching the same failure.
+Kōan can automatically create fix missions when CI fails on its own PRs. When enabled, each iteration checks open Koan-authored PRs for failing check runs and inserts a fix mission with the failure log snippet. Dedup prevents re-dispatching the same failure. Only active when `ci_check.enabled` is true.
 
 ```yaml
 ci_dispatch:

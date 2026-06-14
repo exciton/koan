@@ -56,6 +56,7 @@ def run_plan(
     base_branch: Optional[str] = None,
     project_name: str = "",
     instance_dir: str = "",
+    iterations: int = 1,
 ) -> Tuple[bool, str]:
     """Execute the plan pipeline.
 
@@ -82,12 +83,14 @@ def run_plan(
             project_path, issue_url, notify_fn, skill_dir, context=context,
             base_branch=base_branch,
             project_name=project_name, instance_dir=instance_dir,
+            iterations=iterations,
         )
     elif idea:
         return _run_new_plan(
             project_path, idea, notify_fn, skill_dir, context=context,
             base_branch=base_branch,
             project_name=project_name, instance_dir=instance_dir,
+            iterations=iterations,
         )
     else:
         return False, "No idea or issue URL provided."
@@ -102,6 +105,7 @@ def _run_new_plan(
     base_branch: Optional[str] = None,
     project_name: str = "",
     instance_dir: str = "",
+    iterations: int = 1,
 ) -> Tuple[bool, str]:
     """Generate a plan for a new idea, reusing an existing issue if found."""
     notify_fn(f"\U0001f9e0 Planning: {idea[:100]}{'...' if len(idea) > 100 else ''}")
@@ -119,6 +123,7 @@ def _run_new_plan(
             project_path, existing.url, notify_fn, skill_dir, context=context,
             base_branch=base_branch,
             project_name=project_name, instance_dir=instance_dir,
+            iterations=iterations,
         )
 
     effective_context = merge_context_with_base_branch(context, base_branch)
@@ -128,6 +133,7 @@ def _run_new_plan(
         plan = _generate_plan(
             project_path, idea, context=effective_context, skill_dir=skill_dir,
             project_name=project_name, instance_dir=instance_dir,
+            iterations=iterations, notify_fn=notify_fn,
         )
     except Exception as e:
         return False, f"Plan generation failed: {str(e)[:300]}"
@@ -180,6 +186,7 @@ def _run_issue_plan(
     base_branch: Optional[str] = None,
     project_name: str = "",
     instance_dir: str = "",
+    iterations: int = 1,
 ) -> Tuple[bool, str]:
     """Read an existing issue/PR + comments, generate updated plan, post comment."""
     project_name = project_name or project_name_for_path(project_path)
@@ -233,6 +240,7 @@ def _run_issue_plan(
         plan = _generate_iteration_plan(
             project_path, issue_context, skill_dir=skill_dir,
             project_name=project_name, instance_dir=instance_dir,
+            iterations=iterations, notify_fn=notify_fn,
         )
     except Exception as e:
         reason = f"Plan generation failed: {str(e)[:300]}"
@@ -409,6 +417,111 @@ def improve_plan(
     return output.strip()
 
 
+def _critic_loop(
+    plan_text: str,
+    project_path: str,
+    idea: str,
+    context: str,
+    skill_dir,
+    iterations: int,
+    notify_fn=None,
+    is_iteration: bool = False,
+    issue_context: str = "",
+    project_name: str = "",
+    instance_dir: str = "",
+) -> str:
+    """Refine a plan through N-1 rounds of critique + regeneration.
+
+    Turn 1 is the initial generation (already done by caller).
+    Turns 2..N each run: critic -> regenerate with feedback.
+    """
+    from app.cli_provider import run_command
+    from app.config import get_skill_timeout
+    from app.skill_memory import build_memory_block_for_skill
+
+    current_plan = plan_text
+    _noop_notify = lambda msg: None
+    notify = notify_fn or _noop_notify
+
+    notify(f"\U0001f504 Planning... (turn 1/{iterations})")
+
+    for turn in range(2, iterations + 1):
+        print(f"[plan_runner] Critic turn {turn}/{iterations}: invoking critic", file=sys.stderr)
+        try:
+            critic_prompt = load_prompt_or_skill(
+                skill_dir, "plan-critic",
+                PLAN=current_plan,
+                IDEA=idea or issue_context[:500],
+            )
+        except Exception as e:
+            print(f"[plan_runner] Critic prompt load failed: {e}", file=sys.stderr)
+            break
+
+        try:
+            critique = run_command(
+                critic_prompt, project_path,
+                allowed_tools=["Read", "Glob", "Grep"],
+                model_key="lightweight",
+                max_turns=3,
+                timeout=min(120, get_skill_timeout()),
+            )
+        except Exception as e:
+            print(f"[plan_runner] Critic failed: {e} — keeping current plan", file=sys.stderr)
+            notify(f"⚠️ Critic round {turn} failed — posting best plan so far")
+            break
+
+        if not critique or not critique.strip():
+            print(f"[plan_runner] Critic turn {turn}: empty response — treating as failure", file=sys.stderr)
+            notify(f"⚠️ Critic round {turn} returned empty — posting best plan so far")
+            break
+
+        if "NO_GAPS_FOUND" in critique:
+            print(f"[plan_runner] Critic turn {turn}: no gaps found — done early", file=sys.stderr)
+            break
+
+        print(f"[plan_runner] Critic turn {turn}: gaps found, regenerating", file=sys.stderr)
+
+        feedback_section = f"\n\n## Critic Feedback (turn {turn})\n\n{critique}"
+        try:
+            project_memory = build_memory_block_for_skill(
+                project_path,
+                issue_context if is_iteration else idea,
+                project_name=project_name,
+                instance_dir=instance_dir,
+            )
+            if is_iteration:
+                new_plan = _run_claude_plan(
+                    load_prompt_or_skill(
+                        skill_dir, "plan-iterate",
+                        ISSUE_CONTEXT=issue_context + feedback_section,
+                        PROJECT_MEMORY=project_memory,
+                    ),
+                    project_path,
+                )
+            else:
+                feedback_context = (context or "") + feedback_section
+                new_plan = _run_claude_plan(
+                    load_prompt_or_skill(
+                        skill_dir, "plan", IDEA=idea, CONTEXT=feedback_context,
+                        PROJECT_MEMORY=project_memory,
+                    ),
+                    project_path,
+                )
+        except Exception as e:
+            print(f"[plan_runner] Regeneration failed: {e} — keeping current plan", file=sys.stderr)
+            notify(f"⚠️ Regeneration round {turn} failed — posting best plan so far")
+            break
+
+        if new_plan:
+            current_plan = new_plan
+        else:
+            print("[plan_runner] Regeneration returned empty — keeping current plan", file=sys.stderr)
+
+        notify(f"\U0001f504 Planning... (turn {turn}/{iterations})")
+
+    return current_plan
+
+
 def _review_loop(
     plan_text: str,
     project_path: str,
@@ -559,6 +672,8 @@ def _generate_plan(
     skill_dir=None,
     project_name: str = "",
     instance_dir: str = "",
+    iterations: int = 1,
+    notify_fn=None,
 ):
     """Run Claude to generate a structured plan for a new idea."""
     from app.config import get_plan_review_config
@@ -571,6 +686,13 @@ def _generate_plan(
         skill_dir, "plan", IDEA=idea, CONTEXT=context, PROJECT_MEMORY=project_memory,
     )
     plan = _run_claude_plan(prompt, project_path)
+
+    if iterations > 1:
+        plan = _critic_loop(
+            plan, project_path, idea=idea, context=context,
+            skill_dir=skill_dir, iterations=iterations, notify_fn=notify_fn,
+            project_name=project_name, instance_dir=instance_dir,
+        )
 
     review_cfg = get_plan_review_config()
     if review_cfg["enabled"] and not is_simple_plan(plan):
@@ -589,6 +711,8 @@ def _generate_iteration_plan(
     skill_dir=None,
     project_name: str = "",
     instance_dir: str = "",
+    iterations: int = 1,
+    notify_fn=None,
 ):
     """Run Claude to generate an updated plan based on issue + comments."""
     from app.config import get_plan_review_config
@@ -606,6 +730,14 @@ def _generate_iteration_plan(
         PROJECT_MEMORY=project_memory,
     )
     plan = _run_claude_plan(prompt, project_path)
+
+    if iterations > 1:
+        plan = _critic_loop(
+            plan, project_path, idea="", context="",
+            skill_dir=skill_dir, iterations=iterations, notify_fn=notify_fn,
+            is_iteration=True, issue_context=issue_context,
+            project_name=project_name, instance_dir=instance_dir,
+        )
 
     review_cfg = get_plan_review_config()
     if review_cfg["enabled"] and not is_simple_plan(plan):
@@ -801,6 +933,10 @@ def main(argv=None):
         help="GitHub issue URL to iterate on",
     )
     add_url_skill_common_args(parser)
+    parser.add_argument(
+        "--iterations", type=int, default=1, choices=range(1, 6),
+        help="Number of critique+refine turns (1-5, default 1)",
+    )
     cli_args = parser.parse_args(argv)
 
     skill_dir = Path(__file__).resolve().parent.parent / "skills" / "core" / "plan"
@@ -814,6 +950,7 @@ def main(argv=None):
         base_branch=cli_args.base_branch,
         project_name=cli_args.project_name,
         instance_dir=cli_args.instance_dir,
+        iterations=cli_args.iterations,
     )
     print(summary)
     return 0 if success else 1

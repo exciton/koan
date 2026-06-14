@@ -626,6 +626,32 @@ class TestGetDebugEnabled:
 # --- get_max_runs ---
 
 
+class TestIsUnlimitedQuota:
+    def test_default_false(self):
+        from app.config import is_unlimited_quota
+
+        with _mock_config({}):
+            assert is_unlimited_quota() is False
+
+    def test_true_when_set(self):
+        from app.config import is_unlimited_quota
+
+        with _mock_config({"usage": {"unlimited_quota": True}}):
+            assert is_unlimited_quota() is True
+
+    def test_false_when_explicit(self):
+        from app.config import is_unlimited_quota
+
+        with _mock_config({"usage": {"unlimited_quota": False}}):
+            assert is_unlimited_quota() is False
+
+    def test_truthy_string_coerced(self):
+        from app.config import is_unlimited_quota
+
+        with _mock_config({"usage": {"unlimited_quota": "yes"}}):
+            assert is_unlimited_quota() is True
+
+
 class TestGetMaxRuns:
     def test_default(self):
         from app.config import get_max_runs
@@ -1479,3 +1505,43 @@ class TestThinkingConfig:
         from app.config import should_enable_thinking
         with _mock_config({"thinking": {"enabled": True, "min_mode": "deep"}}):
             assert should_enable_thinking("unknown", tier="critical") is False
+
+
+class TestCiCheckConfig:
+    """Tests for ci_check config getter."""
+
+    def test_enabled_by_default(self):
+        from app.config import is_ci_check_enabled
+        with _mock_config({}):
+            assert is_ci_check_enabled() is True
+
+    def test_enabled_explicitly(self):
+        from app.config import is_ci_check_enabled
+        with _mock_config({"ci_check": {"enabled": True}}):
+            assert is_ci_check_enabled() is True
+
+    def test_disabled(self):
+        from app.config import is_ci_check_enabled
+        with _mock_config({"ci_check": {"enabled": False}}):
+            assert is_ci_check_enabled() is False
+
+    def test_bare_false(self):
+        from app.config import is_ci_check_enabled
+        with _mock_config({"ci_check": False}):
+            assert is_ci_check_enabled() is False
+
+    def test_bare_true(self):
+        from app.config import is_ci_check_enabled
+        with _mock_config({"ci_check": True}):
+            assert is_ci_check_enabled() is True
+
+    def test_non_dict_string(self):
+        from app.config import is_ci_check_enabled
+        with _mock_config({"ci_check": "yes"}):
+            assert is_ci_check_enabled() is True
+
+    def test_non_dict_string_warns(self, capsys):
+        from app.config import is_ci_check_enabled
+        with _mock_config({"ci_check": "yes"}):
+            is_ci_check_enabled()
+        assert "unexpected type" in capsys.readouterr().err

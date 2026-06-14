@@ -24,6 +24,8 @@ from typing import List, Optional
 _MISSION_MAX_RETRIES = 1
 _MISSION_RETRY_DELAY = 10  # seconds
 
+_last_idle_msg = ""  # dedup consecutive identical idle-wait log lines
+
 
 def _handle_skill_dispatch(
     mission_title: str,
@@ -630,12 +632,12 @@ def _run_iteration(
             "Work hours active — waiting for missions (exploration suppressed)",
             f"Work hours — waiting for missions ({time.strftime('%H:%M')})",
         ),
-        "exploration_wait": lambda _: (
-            "All projects have exploration disabled — waiting for missions",
+        "exploration_wait": lambda p: (
+            p.get("decision_reason") or "All projects have exploration disabled — waiting for missions",
             f"Exploration disabled — waiting for missions ({time.strftime('%H:%M')})",
         ),
-        "pr_limit_wait": lambda _: (
-            "PR limit reached for all projects — waiting for reviews",
+        "pr_limit_wait": lambda p: (
+            p.get("decision_reason") or "PR limit reached for all projects — waiting for reviews",
             f"PR limit reached — waiting for reviews ({time.strftime('%H:%M')})",
         ),
         "branch_saturated_wait": lambda p: (
@@ -644,8 +646,11 @@ def _run_iteration(
         ),
     }
     if action in _IDLE_WAIT_CONFIG:
+        global _last_idle_msg
         log_msg, status_msg = _IDLE_WAIT_CONFIG[action](plan)
-        log("koan", log_msg)
+        if log_msg != _last_idle_msg:
+            log("koan", log_msg)
+            _last_idle_msg = log_msg
         _run.set_status(koan_root, status_msg)
         idle_interval = _run._resolve_idle_wait_interval(
             interval, github_enabled, jira_enabled,
@@ -663,6 +668,7 @@ def _run_iteration(
                 wake_on_mission=wake_on_mission,
             )
         if wake == "mission":
+            _last_idle_msg = ""
             log("koan", f"New mission detected during {action} — waking up")
         # branch_saturated_wait is a human-unblock state (review PRs),
         # not an idle state — don't accumulate toward auto-pause.
@@ -899,9 +905,10 @@ def _run_iteration(
         _run.set_status(koan_root, f"Run {run_num}/{max_runs} — {autonomous_mode.upper()} on {project_name}")
 
     mission_start = int(time.time())
-    fd_out, stdout_file = tempfile.mkstemp(prefix="koan-out-")
+    from app.utils import koan_tmp_dir
+    fd_out, stdout_file = tempfile.mkstemp(prefix="koan-out-", dir=koan_tmp_dir())
     os.close(fd_out)
-    fd_err, stderr_file = tempfile.mkstemp(prefix="koan-err-")
+    fd_err, stderr_file = tempfile.mkstemp(prefix="koan-err-", dir=koan_tmp_dir())
     os.close(fd_err)
     claude_exit = 1  # default to failure; overwritten on successful execution
     provider_name = ""

@@ -29,7 +29,12 @@ from typing import List, Optional, Tuple
 from app.github_url_parser import ISSUE_URL_PATTERN, JIRA_ISSUE_URL_PATTERN, PR_URL_PATTERN
 from app.missions import extract_now_flag, strip_all_lifecycle_markers
 from app.run_log import log_safe as _log_skill, suppress_logged
-from app.utils import PROJECT_TAG_PREFIX_RE, is_known_project, project_name_for_path
+from app.utils import (
+    PROJECT_TAG_PREFIX_RE,
+    is_known_project,
+    koan_tmp_dir,
+    project_name_for_path,
+)
 
 # Module-level registry cache for the run process.
 # bridge_state.py caches via _get_registry(), but translate_cli_skill_mission()
@@ -342,6 +347,28 @@ def mission_model_key(command: str, instance_dir: str) -> str:
     return ""
 
 
+def resolve_skill_iterative(command: str, instance_dir: str = "") -> bool:
+    """Return whether the skill for *command* declares ``iterative: true``."""
+    if not command:
+        return False
+    canonical = _resolve_canonical(command)
+    try:
+        from pathlib import Path
+        from app.skills import build_registry
+        instance_skills = Path(instance_dir) / "skills"
+        extra = [instance_skills] if instance_skills.is_dir() else []
+        registry = build_registry(extra)
+        skill = registry.find_by_command(canonical)
+        if skill:
+            return skill.iterative
+    except Exception as exc:
+        from app.debug import debug_log
+        debug_log(
+            f"[skill_dispatch] iterative lookup failed for '{command}': {exc}"
+        )
+    return False
+
+
 def build_skill_command(
     command: str,
     args: str,
@@ -592,10 +619,14 @@ def _build_plan_cmd(
     instance_dir: str,
 ) -> List[str]:
     """Build plan_runner command."""
-    return _build_url_context_cmd(
+    iterations_val, args = _extract_flag(args, _ITERATIONS_RE)
+    cmd = _build_url_context_cmd(
         base_cmd, args, project_name, project_path, instance_dir,
         idea_fallback=True,
     )
+    if iterations_val and cmd:
+        cmd.extend(["--iterations", iterations_val])
+    return cmd
 
 
 _BRANCH_TOKEN_RE = re.compile(r'\bbranch:(\S+)', re.IGNORECASE)
@@ -603,6 +634,7 @@ _TAG_RE = re.compile(r'--tag\s+(\S+)')
 _PLAN_URL_RE = re.compile(r'--plan-url\s+(https://github\.com/[^\s]+)')
 _LIMIT_RE = re.compile(r'\blimit=(\d+)\b', re.IGNORECASE)
 _AUTO_FIX_RE = re.compile(r'--auto-fix(?:=(\w+))?\b', re.IGNORECASE)
+_ITERATIONS_RE = re.compile(r'--iterations(?:\s+|=)(\d+)')
 
 
 def _extract_flag(
@@ -869,7 +901,7 @@ def _build_incident_cmd(
 
     # Write error text to a temp file to avoid shell escaping issues
     if args.strip():
-        fd, path = tempfile.mkstemp(prefix="koan-incident-", suffix=".txt")
+        fd, path = tempfile.mkstemp(prefix="koan-incident-", suffix=".txt", dir=koan_tmp_dir())
         with open(fd, "w", encoding="utf-8") as f:
             f.write(args)
         cmd.extend(["--error-file", path])
@@ -911,7 +943,7 @@ def _build_audit_cmd(
 
     # Write extra context to a temp file to avoid shell escaping issues
     if args.strip():
-        fd, path = tempfile.mkstemp(prefix="koan-audit-", suffix=".txt")
+        fd, path = tempfile.mkstemp(prefix="koan-audit-", suffix=".txt", dir=koan_tmp_dir())
         with open(fd, "w", encoding="utf-8") as f:
             f.write(args)
         cmd.extend(["--context-file", path])
@@ -981,7 +1013,7 @@ def _build_generic_runner_cmd(
     # Pass extra context via temp file to avoid shell escaping issues
     cleaned_args = strip_all_lifecycle_markers(args).strip()
     if cleaned_args:
-        fd, path = tempfile.mkstemp(prefix="koan-ctx-", suffix=".txt")
+        fd, path = tempfile.mkstemp(prefix="koan-ctx-", suffix=".txt", dir=koan_tmp_dir())
         with open(fd, "w", encoding="utf-8") as f:
             f.write(cleaned_args)
         cmd.extend(["--context-file", path])
@@ -1052,6 +1084,12 @@ def validate_skill_args(command: str, args: str) -> Optional[str]:
                 f"/{command} requires a GitHub PR or issue URL "
                 f"(e.g. https://github.com/owner/repo/pull/42)"
             )
+    elif canonical == "plan":
+        iter_match = _ITERATIONS_RE.search(args)
+        if iter_match:
+            n = int(iter_match.group(1))
+            if n < 1 or n > 5:
+                return "--iterations must be between 1 and 5"
 
     return None
 

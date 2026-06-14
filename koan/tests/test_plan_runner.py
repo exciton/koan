@@ -22,6 +22,7 @@ from app.plan_runner import (
     main,
     review_plan,
     _review_loop,
+    _critic_loop,
     is_simple_plan,
 )
 from app.url_skill_args import merge_context_with_base_branch
@@ -1295,3 +1296,136 @@ class TestGeneratePlanWithReview:
                    return_value={"enabled": False, "max_rounds": 3}):
             _generate_plan("/project", "big feature", skill_dir=self._skill_dir())
         mock_loop.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _critic_loop — iterative plan refinement
+# ---------------------------------------------------------------------------
+
+class TestCriticLoop:
+    def _skill_dir(self):
+        return Path("/fake/skills/core/plan")
+
+    @patch("app.plan_runner.load_prompt_or_skill", return_value="critic prompt")
+    @patch("app.cli_provider.run_command", return_value="1. Phase 2 missing X")
+    @patch("app.plan_runner._run_claude_plan")
+    def test_iterations_3_runs_two_critic_rounds(self, mock_regen, mock_critic, mock_load):
+        mock_regen.side_effect = ["plan v2", "plan v3"]
+        result = _critic_loop(
+            "initial plan", "/project", idea="Add feature", context="",
+            skill_dir=self._skill_dir(), iterations=3,
+        )
+        assert mock_critic.call_count == 2
+        assert mock_regen.call_count == 2
+        assert result == "plan v3"
+
+    @patch("app.plan_runner.load_prompt_or_skill", return_value="critic prompt")
+    @patch("app.cli_provider.run_command", return_value="NO_GAPS_FOUND")
+    @patch("app.plan_runner._run_claude_plan")
+    def test_early_exit_on_no_gaps(self, mock_regen, mock_critic, mock_load):
+        result = _critic_loop(
+            "initial plan", "/project", idea="Add feature", context="",
+            skill_dir=self._skill_dir(), iterations=5,
+        )
+        assert mock_critic.call_count == 1
+        mock_regen.assert_not_called()
+        assert result == "initial plan"
+
+    @patch("app.plan_runner.load_prompt_or_skill", return_value="critic prompt")
+    @patch("app.cli_provider.run_command", return_value="1. gap found")
+    @patch("app.plan_runner._run_claude_plan")
+    def test_progress_notifications(self, mock_regen, mock_critic, mock_load):
+        mock_regen.return_value = "plan v2"
+        mock_notify = MagicMock()
+        _critic_loop(
+            "initial plan", "/project", idea="idea", context="",
+            skill_dir=self._skill_dir(), iterations=3, notify_fn=mock_notify,
+        )
+        calls = [c[0][0] for c in mock_notify.call_args_list]
+        assert any("turn 1/3" in c for c in calls)
+        assert any("turn 2/3" in c for c in calls)
+
+    @patch("app.plan_runner.load_prompt_or_skill", return_value="critic prompt")
+    @patch("app.cli_provider.run_command", side_effect=RuntimeError("timeout"))
+    def test_critic_failure_returns_current_plan(self, mock_critic, mock_load):
+        mock_notify = MagicMock()
+        result = _critic_loop(
+            "initial plan", "/project", idea="idea", context="",
+            skill_dir=self._skill_dir(), iterations=3, notify_fn=mock_notify,
+        )
+        assert result == "initial plan"
+        warn_calls = [c[0][0] for c in mock_notify.call_args_list if "failed" in c[0][0]]
+        assert len(warn_calls) == 1
+
+    @patch("app.plan_runner.load_prompt_or_skill", return_value="critic prompt")
+    @patch("app.cli_provider.run_command", return_value="")
+    def test_empty_critic_response_warns_and_stops(self, mock_critic, mock_load):
+        mock_notify = MagicMock()
+        result = _critic_loop(
+            "initial plan", "/project", idea="idea", context="",
+            skill_dir=self._skill_dir(), iterations=3, notify_fn=mock_notify,
+        )
+        assert result == "initial plan"
+        warn_calls = [c[0][0] for c in mock_notify.call_args_list if "empty" in c[0][0]]
+        assert len(warn_calls) == 1
+
+    @patch("app.plan_runner.load_prompt_or_skill", return_value="critic prompt")
+    @patch("app.cli_provider.run_command", return_value="1. gap found")
+    @patch("app.plan_runner._run_claude_plan", return_value="")
+    def test_empty_regeneration_keeps_current(self, mock_regen, mock_critic, mock_load):
+        result = _critic_loop(
+            "initial plan", "/project", idea="idea", context="",
+            skill_dir=self._skill_dir(), iterations=2,
+        )
+        assert result == "initial plan"
+
+
+class TestGeneratePlanWithCriticLoop:
+    def _skill_dir(self):
+        return Path("/fake/skills/core/plan")
+
+    @patch("app.cli_provider.run_command_streaming", return_value="## Plan\n\nStep 1")
+    @patch("app.plan_runner._critic_loop")
+    def test_iterations_1_skips_critic(self, mock_critic, mock_run):
+        with patch("app.plan_runner.load_prompt_or_skill", return_value="prompt"), \
+             patch("app.config.get_plan_review_config",
+                   return_value={"enabled": False, "max_rounds": 3}):
+            _generate_plan(
+                "/project", "idea", skill_dir=self._skill_dir(), iterations=1,
+            )
+        mock_critic.assert_not_called()
+
+    @patch("app.cli_provider.run_command_streaming", return_value="## Plan\n\nStep 1")
+    @patch("app.plan_runner._critic_loop", return_value="refined plan")
+    def test_iterations_3_calls_critic(self, mock_critic, mock_run):
+        with patch("app.plan_runner.load_prompt_or_skill", return_value="prompt"), \
+             patch("app.config.get_plan_review_config",
+                   return_value={"enabled": False, "max_rounds": 3}):
+            result = _generate_plan(
+                "/project", "idea", skill_dir=self._skill_dir(), iterations=3,
+            )
+        mock_critic.assert_called_once()
+        assert result == "refined plan"
+
+    @patch("app.cli_provider.run_command_streaming", return_value="## Plan\n\nStep 1")
+    @patch("app.plan_runner._critic_loop", return_value="refined plan")
+    def test_github_post_fires_once(self, mock_critic, mock_run):
+        """Only the final plan is returned — caller posts once."""
+        with patch("app.plan_runner.load_prompt_or_skill", return_value="prompt"), \
+             patch("app.config.get_plan_review_config",
+                   return_value={"enabled": False, "max_rounds": 3}):
+            result = _generate_plan(
+                "/project", "idea", skill_dir=self._skill_dir(), iterations=3,
+            )
+        assert result == "refined plan"
+        assert mock_run.call_count == 1
+
+
+class TestMainIterationsArgparseValidation:
+    def test_iterations_out_of_range_rejected_by_argparse(self):
+        with pytest.raises(SystemExit):
+            main(["--project-path", "/tmp", "--idea", "test", "--iterations", "100"])
+
+    def test_iterations_zero_rejected_by_argparse(self):
+        with pytest.raises(SystemExit):
+            main(["--project-path", "/tmp", "--idea", "test", "--iterations", "0"])

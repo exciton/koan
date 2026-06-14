@@ -640,6 +640,43 @@ def get_cli_output_journal() -> bool:
     return bool(value)
 
 
+def is_ci_check_enabled() -> bool:
+    """Check if the CI check system is enabled.
+
+    Controls the entire CI check pipeline: queue draining, auto-dispatch
+    of fix missions on CI failures, and the ``/ci_check`` skill command.
+    Disable to save tokens when CI monitoring is not needed.
+
+    Config key: ci_check.enabled (default: True)
+    """
+    config = _load_config()
+    ci_cfg = config.get("ci_check", {})
+    if isinstance(ci_cfg, dict):
+        return bool(ci_cfg.get("enabled", True))
+    if isinstance(ci_cfg, bool):
+        return ci_cfg
+    import sys
+    print(
+        f"[config] ci_check has unexpected type {type(ci_cfg).__name__!r}, defaulting to enabled",
+        file=sys.stderr,
+    )
+    return True
+
+
+def is_unlimited_quota() -> bool:
+    """Return True when the operator declares the CLI provider has no quota limit.
+
+    When enabled, all proactive quota gating is disabled: no budget-based mode
+    downgrades, no burn-rate warnings, no preflight quota probes.  Reactive
+    detection (CLI exits with a quota error) still works — if the provider
+    actually hits a limit, Koan pauses and requeues as usual.
+
+    Config key: usage.unlimited_quota (default: False).
+    """
+    config = _load_config()
+    return bool(config.get("usage", {}).get("unlimited_quota", False))
+
+
 def get_max_runs() -> int:
     """Get maximum runs per day from config.yaml.
 

@@ -2211,6 +2211,68 @@ class TestIdleWaitConfig:
         status_calls = [c for c in mock_status.call_args_list if "PR limit" in str(c)]
         assert len(status_calls) >= 1
 
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_exploration_wait_focus_gated_logs_specific_reason(
+        self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path,
+    ):
+        """exploration_wait with focus-gated decision_reason should log specific reason."""
+        import app.mission_executor as _me
+        _me._last_idle_msg = ""
+        from app.run import _run_iteration
+        reason = "All projects have focus enabled — waiting for queued missions"
+        mock_plan.return_value = self._make_plan(
+            "exploration_wait", decision_reason=reason,
+        )
+        instance = str(tmp_path / "instance")
+        os.makedirs(instance, exist_ok=True)
+        (tmp_path / ".koan-project").write_text("koan")
+
+        _run_iteration(
+            koan_root=str(tmp_path),
+            instance=instance,
+            projects=[("koan", "/tmp/koan")],
+            count=0, max_runs=10, interval=60, git_sync_interval=5,
+        )
+
+        log_messages = [str(c) for c in mock_log.call_args_list]
+        assert any("focus enabled" in m for m in log_messages), (
+            f"Expected focus-gated reason in log, got: {log_messages}"
+        )
+
+    @patch("app.run.interruptible_sleep", return_value=None)
+    @patch("app.run.set_status")
+    @patch("app.run.log")
+    @patch("app.run.plan_iteration")
+    def test_pr_limit_wait_logs_project_names(
+        self, mock_plan, mock_log, mock_status, mock_sleep, tmp_path,
+    ):
+        """pr_limit_wait should log project-specific reason from decision_reason."""
+        import app.mission_executor as _me
+        _me._last_idle_msg = ""
+        from app.run import _run_iteration
+        reason = "PR limit reached for: my-toolkit — waiting for reviews"
+        mock_plan.return_value = self._make_plan(
+            "pr_limit_wait", decision_reason=reason,
+        )
+        instance = str(tmp_path / "instance")
+        os.makedirs(instance, exist_ok=True)
+        (tmp_path / ".koan-project").write_text("koan")
+
+        _run_iteration(
+            koan_root=str(tmp_path),
+            instance=instance,
+            projects=[("koan", "/tmp/koan")],
+            count=0, max_runs=10, interval=60, git_sync_interval=5,
+        )
+
+        log_messages = [str(c) for c in mock_log.call_args_list]
+        assert any("my-toolkit" in m for m in log_messages), (
+            f"Expected project name in log, got: {log_messages}"
+        )
+
     @patch("app.run.run_claude_task")
     @patch("app.run.interruptible_sleep", return_value=None)
     @patch("app.run.set_status")

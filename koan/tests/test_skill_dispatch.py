@@ -13,6 +13,7 @@ from app.skill_dispatch import (
     expand_combo_skill,
     validate_skill_args,
     _build_rebase_cmd,
+    _build_plan_cmd,
 )
 
 
@@ -1263,6 +1264,22 @@ class TestValidateSkillArgs:
         assert validate_skill_args("plan", "Add dark mode") is None
         assert validate_skill_args("plan", "") is None
 
+    def test_plan_iterations_valid(self):
+        assert validate_skill_args("plan", "--iterations 3 Add dark mode") is None
+        assert validate_skill_args("plan", "--iterations=3 Add dark mode") is None
+        assert validate_skill_args("plan", "--iterations 1 foo") is None
+        assert validate_skill_args("plan", "--iterations 5 foo") is None
+
+    def test_plan_iterations_out_of_range(self):
+        err = validate_skill_args("plan", "--iterations 10 Add dark mode")
+        assert err is not None
+        assert "between 1 and 5" in err
+
+    def test_plan_iterations_zero(self):
+        err = validate_skill_args("plan", "--iterations 0 Add dark mode")
+        assert err is not None
+        assert "between 1 and 5" in err
+
     def test_ai_always_valid(self):
         """AI has no arg requirements."""
         assert validate_skill_args("ai", "") is None
@@ -1918,3 +1935,47 @@ class TestBuildRebaseCmdSeverity:
     def test_unrelated_text_after_url_ignored(self):
         cmd = _build_rebase_cmd(self.BASE_CMD, f"{self.URL} thanks", "/project")
         assert "--min-severity" not in cmd
+
+
+# ---------------------------------------------------------------------------
+# _build_plan_cmd — iterations flag extraction
+# ---------------------------------------------------------------------------
+
+class TestBuildPlanCmdIterations:
+    BASE_CMD = ["python3", "-m", "app.plan_runner"]
+
+    def test_iterations_space_format(self):
+        cmd = _build_plan_cmd(
+            self.BASE_CMD, "--iterations 3 Add dark mode",
+            "proj", "/project", "/instance",
+        )
+        assert "--iterations" in cmd
+        idx = cmd.index("--iterations")
+        assert cmd[idx + 1] == "3"
+        assert "--idea" in cmd
+        idea_idx = cmd.index("--idea")
+        assert "dark mode" in cmd[idea_idx + 1]
+
+    def test_iterations_equals_format(self):
+        cmd = _build_plan_cmd(
+            self.BASE_CMD, "--iterations=3 Add dark mode",
+            "proj", "/project", "/instance",
+        )
+        assert "--iterations" in cmd
+        idx = cmd.index("--iterations")
+        assert cmd[idx + 1] == "3"
+
+    def test_no_iterations_flag(self):
+        cmd = _build_plan_cmd(
+            self.BASE_CMD, "Add dark mode",
+            "proj", "/project", "/instance",
+        )
+        assert "--iterations" not in cmd
+
+    def test_iterations_not_leaked_to_idea(self):
+        cmd = _build_plan_cmd(
+            self.BASE_CMD, "--iterations 2 Add dark mode",
+            "proj", "/project", "/instance",
+        )
+        idea_idx = cmd.index("--idea")
+        assert "--iterations" not in cmd[idea_idx + 1]

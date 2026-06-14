@@ -38,7 +38,7 @@ Complete reference for all Koan slash commands. Use these via Telegram, Slack, o
 
 | Command | Aliases | Description | GitHub @mention |
 |---------|---------|-------------|:-:|
-| `/plan <desc>` | — | Deep-think an idea, create a tracker issue with task-level plan (file map, checkbox steps, code blocks, self-review) | — |
+| `/plan [--iterations N] <desc>` | — | Deep-think an idea, create a tracker issue with task-level plan (file map, checkbox steps, code blocks, self-review). `--iterations N` (1-5) runs N critique+refine rounds. | — |
 | `/deepplan <desc>` | `/deeplan` | Spec-first design: explore approaches, post spec, queue /plan | — |
 | `/implement <issue>` | `/impl` | Queue implementation for a GitHub or Jira issue; never bails — resolves ambiguity with simplest viable solution, retries once before surfacing a problem | Yes |
 | `/fix <issue>` | — | Understand → plan → test → implement → submit PR | Yes |
@@ -51,7 +51,7 @@ Complete reference for all Koan slash commands. Use these via Telegram, Slack, o
 | `/refactor <desc>` | `/rf` | Targeted refactoring mission | Yes |
 | `/check <url>` | `/inspect` | Run project health checks on a PR or issue (rebase, review, plan) | — |
 | `/check_need <url>` | `/need`, `/needs` | Analyze if a PR or issue is still needed vs. current main | — |
-| `/ci_check <PR>` | — | Check and fix CI failures on a PR | — |
+| `/ci_check <PR>\|--enable\|--disable` | — | Check and fix CI failures on a PR; toggle CI system | — |
 | `/pr <PR>` | — | Review and update a GitHub pull request | — |
 | `/claudemd [project]` | `/claude`, `/claude.md` | Refresh or create a project's CLAUDE.md | — |
 | `/doc <project> [cats]` | `/docs` | Extract structured documentation to docs/ | Yes |
@@ -135,7 +135,7 @@ Skills marked **GitHub @mention** can be triggered by commenting `@koan-bot <com
 | `/unfocus` | — | Exit focus mode |
 | `/passive [duration]` | — | Enter read-only passive mode |
 | `/active` | — | Exit passive mode, resume execution |
-| `/explore [project]` | `/exploration`, `/noexplore` | Toggle per-project exploration mode |
+| `/explore [project\|all\|none]` | `/exploration`, `/noexplore [project\|all]` | Toggle per-project exploration mode; `all`/`none` also sets default for future projects |
 | `/autoreview [project]` | `/auto_review`, `/noautoreview` | Toggle automatic review+rebase after PR creation per project |
 | `/language <lang>` | `/lng`, `/fr`, `/en` | Set reply language preference |
 
