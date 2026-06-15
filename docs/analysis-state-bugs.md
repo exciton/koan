@@ -934,7 +934,7 @@ know to look at this file.
 
 ### D9 — `outbox-sending.md` staging file undocumented ✅ FIXED
 
-**Branch:** `claude/simplify-outbox-append`
+**Branch:** `claude/document-outbox-sending` (PR [#1970](https://github.com/Anantys-oss/koan/pull/1970), split out of S3)
 
 **Fix applied:** Added `outbox-sending.md` to the instance directory section of
 CLAUDE.md explaining it is a crash-safety two-phase write staging file, what

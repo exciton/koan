@@ -698,14 +698,13 @@ recovery.jsonl as the audit trail for crash-recovery events.
 
 **Title:** `docs(claude.md): document outbox-sending.md staging file in instance section`
 
-**Branch:** `claude/simplify-outbox-append` (appended to S3)
+**Branch:** `claude/document-outbox-sending`
 
-[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/simplify-outbox-append?expand=1)
+**PR:** [#1970](https://github.com/Anantys-oss/koan/pull/1970) (open) — split out of S3 so the docs change lands independently of the requeue() refactor.
 
 **Body:**
 ```
-(see S3 PR body — this documentation commit is part of the same branch)
-
+## Summary
 Added outbox-sending.md to the instance/ directory listing in CLAUDE.md explaining it is a
 crash-safety two-phase write staging file, what happens if it persists (potential duplicate
 Telegram sends), and that it can be safely deleted manually if messages appear stuck.
