@@ -1567,8 +1567,7 @@ def _build_verdict_body(
         return base
 
     lines = [base, ""]
-    for title in blockers:
-        lines.append(f"- {title}")
+    lines.extend(f"- {title}" for title in blockers)
     return "\n".join(lines)
 
 
