@@ -1063,7 +1063,11 @@ def _move_pending_to_section(
     if result is None:
         result = _remove_item_by_text(content, needle, "in_progress")
     if result is None:
-        return content, False
+        # Normalize even on the not-found path so callers receive content of
+        # the same shape (collapsed blank-line runs, no trailing whitespace)
+        # as the found paths below. Without this, found=False could return
+        # raw content that differs from a found=True return for the same input.
+        return normalize_content(content), False
 
     updated = result[0]
 
