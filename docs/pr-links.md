@@ -678,16 +678,18 @@ mission_executor.py, mission_runner.py) to look at for a given concern.
 
 **Title:** `docs(claude.md): add recovery.jsonl to instance directory section`
 
-**Branch:** `claude/simplify-pending-journal-read` (appended to S6)
+**Branch:** `claude/document-recovery-jsonl`
 
-[Open PR →](https://github.com/Anantys-oss/koan/compare/main...exciton:koan:claude/simplify-pending-journal-read?expand=1)
+**PR:** [#1969](https://github.com/Anantys-oss/koan/pull/1969) (open) — split out of S6 so the docs change lands independently of the recover.py refactor.
 
 **Body:**
 ```
-(see S6 PR body — this documentation commit is part of the same branch)
-
+## Summary
 Added recovery.jsonl to the instance/ directory listing in CLAUDE.md with a description
 of its schema and interpretation (many entries = crash loop candidate).
+
+Operators debugging repeated crashes previously had no documentation pointing them at
+recovery.jsonl as the audit trail for crash-recovery events.
 ```
 
 ---

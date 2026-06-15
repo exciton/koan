@@ -918,7 +918,7 @@ was missing from CLAUDE.md entirely.)
 
 ### D8 — `recover.py` recovery event log (`recovery.jsonl`) is undocumented in CLAUDE.md ✅ FIXED
 
-**Branch:** `claude/simplify-pending-journal-read`
+**Branch:** `claude/document-recovery-jsonl` (PR [#1969](https://github.com/Anantys-oss/koan/pull/1969), split out of S6)
 
 **Fix applied:** Added `recovery.jsonl` to the instance directory section of CLAUDE.md
 with a description of its schema and what a large file implies (crash loop candidate).
