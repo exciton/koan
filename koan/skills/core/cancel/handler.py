@@ -46,20 +46,17 @@ def _parse_positions(args):
 
 def _list_pending(missions_file):
     """Show numbered list of pending missions for selection."""
-    if not missions_file.exists():
-        return "ℹ️ No pending missions."
+    from app.mission_store import MissionStore
 
-    from app.missions import list_pending, clean_mission_display
-
-    pending = list_pending(missions_file.read_text())
+    store = MissionStore.load(str(missions_file.parent))
+    pending = store.get_by_status("pending")
 
     if not pending:
         return "ℹ️ No pending missions."
 
     parts = ["Pending missions:\n"]
-    for i, m in enumerate(pending, 1):
-        display = clean_mission_display(m)
-        parts.append(f"  {i}. {display}")
+    for i, r in enumerate(pending, 1):
+        parts.append(f"  {i}. {r.display_title()}")
 
     parts.append("\nReply /cancel <number> or /cancel 3,5,7 to cancel.")
     return "\n".join(parts)
@@ -67,11 +64,10 @@ def _list_pending(missions_file):
 
 def _cancel_mission(missions_file, identifier):
     """Cancel a mission by number or keyword."""
-    from app.missions import clean_mission_display
     from app.mission_store import locked_store
 
     instance_dir = str(missions_file.parent)
-    cancelled_text = None
+    cancelled_display = None
 
     with locked_store(instance_dir) as store:
         pending = store.get_by_status("pending")
@@ -94,19 +90,14 @@ def _cancel_mission(missions_file, identifier):
             if record is None:
                 return f"⚠️ No pending mission matching '{identifier}'."
 
-        if record.project:
-            cancelled_text = f"[project:{record.project}] {record.text}"
-        else:
-            cancelled_text = record.text
+        cancelled_display = record.display_title()
         store.cancel(record.text)
 
-    display = clean_mission_display(cancelled_text)
-    return f"🗑 Mission cancelled: {display}"
+    return f"🗑 Mission cancelled: {cancelled_display}"
 
 
 def _cancel_bulk(missions_file, positions):
     """Cancel multiple pending missions by position."""
-    from app.missions import clean_mission_display
     from app.mission_store import locked_store
 
     instance_dir = str(missions_file.parent)
@@ -125,11 +116,7 @@ def _cancel_bulk(missions_file, positions):
 
         displays = []
         for record in records_to_cancel:
-            if record.project:
-                display_text = f"[project:{record.project}] {record.text}"
-            else:
-                display_text = record.text
-            displays.append(clean_mission_display(display_text))
+            displays.append(record.display_title())
             store.cancel(record.text)
 
     parts = ["🗑 Cancelled missions:"]

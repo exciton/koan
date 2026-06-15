@@ -115,6 +115,35 @@ class MissionRecord:
     complexity: Optional[str]      # None | "trivial" | "simple" | "medium" | "complex"
     crash_count: int               # crash-recovery requeue count (replaces [r:N])
 
+    def display_title(self, max_length: int = 120) -> str:
+        """Return a display-formatted title: '[project] text', truncated.
+
+        Strips trailing origin markers (📬, 🎫) from text and converts the
+        project field to a leading ``[project]`` prefix.  Safe to call on
+        any record regardless of status.
+        """
+        text = self.text
+        for marker in ("📬", "🎫"):
+            if text.endswith(marker):
+                text = text[: -len(marker)].rstrip()
+                break
+        if self.project:
+            text = f"[{self.project}] {text}"
+        if len(text) > max_length:
+            text = text[: max_length - 3] + "..."
+        return text
+
+    def origin_marker(self) -> str:
+        """Return the trailing origin marker embedded in ``text``, or ``''``.
+
+        Returns ``'📬'`` for GitHub-sourced missions and ``'🎫'`` for
+        Jira-sourced missions.  Returns an empty string for all others.
+        """
+        for marker in ("📬", "🎫"):
+            if self.text.endswith(marker):
+                return marker
+        return ""
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to a plain dict for JSON persistence."""
         return {

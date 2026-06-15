@@ -47,19 +47,16 @@ def _parse_positions(args):
 
 def _show_queue_with_hint(missions_file):
     """Show queue with usage hint when /priority is called bare."""
-    if not missions_file.exists():
-        return "ℹ️ Queue is empty.\n\nUsage: /prio <n>"
+    from app.mission_store import MissionStore
 
-    from app.missions import list_pending, clean_mission_display
-
-    pending = list_pending(missions_file.read_text())
+    store = MissionStore.load(str(missions_file.parent))
+    pending = store.get_by_status("pending")
     if not pending:
         return "ℹ️ Queue is empty.\n\nUsage: /prio <n>"
 
     parts = ["PENDING"]
-    for i, m in enumerate(pending, 1):
-        display = clean_mission_display(m)
-        parts.append(f"  {i}. {display}")
+    for i, r in enumerate(pending, 1):
+        parts.append(f"  {i}. {r.display_title()}")
 
     parts.append("\nUsage:")
     parts.append("  /prio <n>       — bump mission #n to the top")
@@ -69,7 +66,6 @@ def _show_queue_with_hint(missions_file):
 
 def _reorder_single(missions_file, position):
     """Move a single pending mission to top of queue."""
-    from app.missions import clean_mission_display
     from app.mission_store import locked_store
 
     instance_dir = str(missions_file.parent)
@@ -82,11 +78,7 @@ def _reorder_single(missions_file, position):
             return f"⚠️ Invalid position. Use 1-{len(pending)}."
 
         record = pending[position - 1]
-        if record.project:
-            display_text = f"[project:{record.project}] {record.text}"
-        else:
-            display_text = record.text
-        moved_display = clean_mission_display(display_text)
+        moved_display = record.display_title()
         store.reorder_pending(position - 1, 0)
 
     return f"⬆️ Bumped to top: {moved_display}"
@@ -94,7 +86,6 @@ def _reorder_single(missions_file, position):
 
 def _reorder_bulk(missions_file, positions):
     """Reorder multiple pending missions to the top of the queue."""
-    from app.missions import clean_mission_display
     from app.mission_store import locked_store
 
     if len(set(positions)) != len(positions):
@@ -116,11 +107,7 @@ def _reorder_bulk(missions_file, positions):
         target_records = [pending[pos - 1] for pos in positions]
 
         for i, record in enumerate(target_records):
-            if record.project:
-                display_text = f"[project:{record.project}] {record.text}"
-            else:
-                display_text = record.text
-            displays.append(clean_mission_display(display_text))
+            displays.append(record.display_title())
 
             # Find current index of this record in the pending sub-queue
             current_pending = store.get_by_status("pending")
