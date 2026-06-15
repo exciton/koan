@@ -8,7 +8,6 @@ Core shared utilities used across modules:
 - parse_project: [project:name] / [projet:name] tag extraction
 - atomic_write: crash-safe file writes
 - insert_pending_mission: append mission to missions.md pending section
-- modify_missions_file: locked read-modify-write on missions.md
 - get_known_projects / resolve_project_path: project registry
 - append_to_outbox: outbox file appending
 
@@ -650,18 +649,6 @@ def insert_pending_mission(
 
     _locked_missions_rw(missions_path, _transform)
     return inserted
-
-
-def modify_missions_file(missions_path: Path, transform):
-    """Apply a transform function to missions.md content with file locking.
-
-    Args:
-        missions_path: Path to missions.md
-        transform: Callable(content: str) -> str that returns modified content.
-
-    Returns the transformed content.
-    """
-    return _locked_missions_rw(missions_path, transform)
 
 
 def _get_known_projects_for_root(koan_root: Path) -> list:

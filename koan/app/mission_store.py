@@ -179,6 +179,11 @@ class MissionStore:
         # Ordered list of all records (across all statuses).
         # Within each status the list order defines queue position.
         self._records: List[MissionRecord] = []
+        # Ideas backlog (the ``## Ideas`` section). Each item is the idea
+        # content with the leading ``- `` stripped. Ideas are never picked up
+        # by the agent loop; the store owns them only so generate_view() does
+        # not destroy the section when it regenerates missions.md.
+        self._ideas: List[str] = []
         # sha256 of the last missions.md content we wrote, used to detect
         # human edits between save() calls.
         self._last_view_hash: Optional[str] = None
@@ -246,6 +251,7 @@ class MissionStore:
         for item in records_data:
             store._records.append(MissionRecord.from_dict(item))
 
+        store._ideas = list(raw.get("ideas", []))
         store._last_view_hash = raw.get("view_hash")
 
         # Detect human edits to missions.md since the last save
@@ -277,6 +283,7 @@ class MissionStore:
 
         payload: Dict[str, Any] = {
             "records": [r.to_dict() for r in self._records],
+            "ideas": self._ideas,
             "view_hash": view_hash,
         }
 
@@ -557,7 +564,11 @@ class MissionStore:
             Count of newly created records (i.e. missions added by a human
             editor that were not already in the JSON store).
         """
-        from app.missions import parse_sections, canonical_mission_key  # lazy
+        from app.missions import parse_ideas, parse_sections, canonical_mission_key  # lazy
+
+        # Re-capture the Ideas backlog from the edited view so direct edits
+        # (or programmatic inserts) to the ## Ideas section are not lost.
+        self._ideas = [_strip_list_marker(item) for item in parse_ideas(markdown)]
 
         sections = parse_sections(markdown)
         # Map status key → list of raw item strings
@@ -630,6 +641,14 @@ class MissionStore:
         }
 
         lines = ["# Missions", ""]
+
+        # Emit the Ideas backlog first (mirrors insert_idea's placement right
+        # after the title). Only rendered when there are ideas to preserve.
+        if self._ideas:
+            lines.append("## Ideas")
+            lines.append("")
+            lines.extend(f"- {t}" for t in self._ideas)
+            lines.append("")
 
         for status in _VIEW_ORDER:
             header = _STATUS_HEADERS[status]
@@ -758,11 +777,23 @@ class MissionStore:
 
         Returns:
             ``True`` if the record was found and updated, ``False`` otherwise.
+
+        Raises:
+            ValueError: If multiple pending records match ``old_text`` (ambiguous).
         """
-        record = self.find(old_text)
-        if record is None or record.status != "pending":
-            return False
         from app.missions import canonical_mission_key
+        needle = canonical_mission_key(old_text)
+        pending_matches = [
+            r for r in self._records
+            if r.status == "pending" and canonical_mission_key(r.text) == needle
+        ]
+        if len(pending_matches) > 1:
+            raise ValueError(
+                f"Ambiguous match: {len(pending_matches)} pending records match the text"
+            )
+        record = pending_matches[0] if pending_matches else None
+        if record is None:
+            return False
         record.text = canonical_mission_key(new_text) or new_text.strip()
         return True
 
@@ -792,7 +823,7 @@ class MissionStore:
             ``True`` if the record was found and updated.
         """
         record = self.find(text)
-        if record is None:
+        if record is None or record.status != "pending":
             return False
         record.complexity = tier
         return True
@@ -816,6 +847,82 @@ class MissionStore:
         return removed
 
     # ------------------------------------------------------------------
+    # Ideas backlog (## Ideas section)
+    # ------------------------------------------------------------------
+
+    def get_ideas(self) -> List[str]:
+        """Return the ideas backlog as ``"- ..."`` lines (parse_ideas format)."""
+        return [f"- {t}" for t in self._ideas]
+
+    def add_idea(self, entry: str) -> None:
+        """Append an idea to the backlog.
+
+        Args:
+            entry: The idea line; a leading ``"- "`` is stripped if present.
+        """
+        self._ideas.append(_strip_list_marker(entry))
+
+    def delete_idea(self, index: int) -> Optional[str]:
+        """Delete the idea at *index* (1-based).
+
+        Returns:
+            The removed idea as a ``"- ..."`` line, or ``None`` if the index
+            is out of range.
+        """
+        if index < 1 or index > len(self._ideas):
+            return None
+        removed = self._ideas.pop(index - 1)
+        return f"- {removed}"
+
+    def promote_idea(self, index: int) -> Optional[str]:
+        """Promote the idea at *index* (1-based) to the top of the pending queue.
+
+        Returns:
+            The promoted idea as a ``"- ..."`` line, or ``None`` if the index
+            is out of range.
+        """
+        if index < 1 or index > len(self._ideas):
+            return None
+        idea_text = self._ideas.pop(index - 1)
+        self._add_pending_top(idea_text)
+        return f"- {idea_text}"
+
+    def promote_all_ideas(self) -> List[str]:
+        """Promote all ideas to the pending queue (preserving order).
+
+        Returns:
+            List of promoted ideas as ``"- ..."`` lines (empty if no ideas).
+        """
+        if not self._ideas:
+            return []
+        promoted = [f"- {t}" for t in self._ideas]
+        # Insert in reverse so the first idea ends up on top of pending
+        for idea_text in reversed(self._ideas):
+            self._add_pending_top(idea_text)
+        self._ideas = []
+        return promoted
+
+    def _add_pending_top(self, idea_text: str) -> None:
+        """Add *idea_text* as a pending mission at the top of the queue.
+
+        The idea text may carry a ``[project:X]`` tag, which is split out into
+        the record's project field.
+        """
+        from app.utils import parse_project
+
+        project, clean = parse_project(idea_text)
+        record = self.add(clean, project or "")
+        # Move to the top of the pending sub-queue (urgent — matches the old
+        # insert_mission(..., urgent=True) behaviour for promoted ideas).
+        if record in self._records:
+            self._records.remove(record)
+        insert_at = next(
+            (i for i, r in enumerate(self._records) if r.status == "pending"),
+            len(self._records),
+        )
+        self._records.insert(insert_at, record)
+
+    # ------------------------------------------------------------------
     # Migration (classmethod)
     # ------------------------------------------------------------------
 
@@ -837,7 +944,7 @@ class MissionStore:
         Returns:
             A populated :class:`MissionStore` (already saved to disk).
         """
-        from app.missions import parse_sections  # lazy import
+        from app.missions import parse_ideas, parse_sections  # lazy import
 
         store = cls(instance_dir)
         view_path = store._view_path()
@@ -854,6 +961,9 @@ class MissionStore:
             # Nothing to migrate — return an empty store
             return store
 
+        # Preserve the Ideas backlog across migration
+        store._ideas = [_strip_list_marker(item) for item in parse_ideas(content)]
+
         sections = parse_sections(content)
 
         # Section → status ordering for migration (maintain queue order)
@@ -867,7 +977,7 @@ class MissionStore:
         for section_key, status in ordered_sections:
             for raw_item in sections.get(section_key, []):
                 record = _parse_record_from_markdown_line(raw_item, status)
-                if record.text:
+                if record.text and "~~" not in record.text:
                     store._records.append(record)
 
         # Persist the migrated store immediately
@@ -916,6 +1026,14 @@ def locked_store(instance_dir: str) -> Generator[MissionStore, None, None]:
 # ---------------------------------------------------------------------------
 
 
+def _strip_list_marker(text: str) -> str:
+    """Strip a single leading ``"- "`` list marker (used for idea lines)."""
+    text = text.strip()
+    if text.startswith("- "):
+        text = text[2:]
+    return text
+
+
 def _strip_all_markers(text: str) -> str:
     """Strip all known lifecycle markers from a mission line.
 
@@ -927,13 +1045,16 @@ def _strip_all_markers(text: str) -> str:
     - ``[complexity:X]`` complexity tag
     - ``[flushed]`` / ``[stagnation]`` fate tags
     - Leading ``"- "`` prefix
+    - Leading ``"### "`` complex-block header prefix
 
     Returns the clean text suitable for storing in :attr:`MissionRecord.text`.
     """
-    # Strip leading list marker
+    # Strip leading list marker or complex-block header prefix
     text = text.strip()
     if text.startswith("- "):
         text = text[2:]
+    elif text.startswith("### "):
+        text = text[4:]
 
     # Truncate at the ⏳ marker position — everything from there onwards is
     # lifecycle metadata (mirrors requeue_mission() logic in missions.py).

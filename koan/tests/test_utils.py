@@ -424,36 +424,6 @@ class TestInsertPendingMission:
         temp_files = list(tmp_path.glob(".missions-*"))
         assert temp_files == [], f"Temp files left behind: {temp_files}"
 
-    def test_atomic_write_preserves_content_on_transform_error(self, tmp_path):
-        """If the transform raises, the original file should be untouched."""
-        from app.utils import modify_missions_file
-        missions = tmp_path / "missions.md"
-        original = "# Missions\n\n## Pending\n- keep this\n\n## In Progress\n"
-        missions.write_text(original)
-
-        def bad_transform(content):
-            raise ValueError("deliberate error")
-
-        with pytest.raises(ValueError, match="deliberate error"):
-            modify_missions_file(missions, bad_transform)
-
-        assert missions.read_text() == original, "Original file must survive a failed transform"
-
-    def test_no_temp_file_left_on_error(self, tmp_path):
-        """Temp file should be cleaned up even when transform raises."""
-        from app.utils import modify_missions_file
-        missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n")
-
-        def bad_transform(content):
-            raise RuntimeError("boom")
-
-        with pytest.raises(RuntimeError):
-            modify_missions_file(missions, bad_transform)
-
-        temp_files = list(tmp_path.glob(".missions-*"))
-        assert temp_files == [], f"Temp files left behind after error: {temp_files}"
-
     def test_returns_true_when_inserted(self, tmp_path):
         from app.utils import insert_pending_mission
         missions = tmp_path / "missions.md"
@@ -496,25 +466,6 @@ class TestInsertPendingMission:
         )
         # Non-GitHub missions are not deduped (no signature)
         assert result is True
-
-    def test_modify_missions_file_returns_new_content(self, tmp_path):
-        """modify_missions_file should return the transformed content."""
-        from app.utils import modify_missions_file
-        missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n")
-
-        result = modify_missions_file(missions, lambda c: c + "# Extra\n")
-        assert result.endswith("# Extra\n")
-        assert missions.read_text() == result
-
-    def test_modify_creates_file_if_missing(self, tmp_path):
-        """modify_missions_file should create the file if it doesn't exist."""
-        from app.utils import modify_missions_file
-        missions = tmp_path / "missions.md"
-
-        result = modify_missions_file(missions, lambda c: c)
-        assert missions.exists()
-        assert "## Pending" in result
 
 
 class TestGetJournalFile:

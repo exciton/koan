@@ -69,45 +69,69 @@ def _show_queue_with_hint(missions_file):
 
 def _reorder_single(missions_file, position):
     """Move a single pending mission to top of queue."""
-    from app.missions import reorder_mission
-    from app.utils import modify_missions_file
+    from app.missions import clean_mission_display
+    from app.mission_store import locked_store
 
-    moved_display = None
+    instance_dir = str(missions_file.parent)
 
-    def _transform(content):
-        nonlocal moved_display
-        updated, moved_display = reorder_mission(content, position, 1)
-        return updated
+    with locked_store(instance_dir) as store:
+        pending = store.get_by_status("pending")
+        if not pending:
+            return "⚠️ No pending missions to reorder."
+        if position < 1 or position > len(pending):
+            return f"⚠️ Invalid position. Use 1-{len(pending)}."
 
-    try:
-        modify_missions_file(missions_file, _transform)
-    except ValueError as e:
-        return f"⚠️ {e}"
-
-    if moved_display is None:
-        return "⚠️ Error during reorder."
+        record = pending[position - 1]
+        if record.project:
+            display_text = f"[project:{record.project}] {record.text}"
+        else:
+            display_text = record.text
+        moved_display = clean_mission_display(display_text)
+        store.reorder_pending(position - 1, 0)
 
     return f"⬆️ Bumped to top: {moved_display}"
 
 
 def _reorder_bulk(missions_file, positions):
     """Reorder multiple pending missions to the top of the queue."""
-    from app.missions import reorder_missions_bulk
-    from app.utils import modify_missions_file
+    from app.missions import clean_mission_display
+    from app.mission_store import locked_store
 
-    displays = None
+    if len(set(positions)) != len(positions):
+        return "⚠️ Duplicate positions: use each position only once."
 
-    def _transform(content):
-        nonlocal displays
-        updated, displays = reorder_missions_bulk(content, positions)
-        return updated
+    instance_dir = str(missions_file.parent)
+    displays = []
 
-    try:
-        modify_missions_file(missions_file, _transform)
-    except ValueError as e:
-        return f"⚠️ {e}"
+    with locked_store(instance_dir) as store:
+        pending = store.get_by_status("pending")
+        if not pending:
+            return "⚠️ No pending missions to reorder."
 
-    if displays is None:
+        for pos in positions:
+            if pos < 1 or pos > len(pending):
+                return f"⚠️ Invalid position {pos}. Use 1-{len(pending)}."
+
+        # Snapshot records at the original positions before any mutation
+        target_records = [pending[pos - 1] for pos in positions]
+
+        for i, record in enumerate(target_records):
+            if record.project:
+                display_text = f"[project:{record.project}] {record.text}"
+            else:
+                display_text = record.text
+            displays.append(clean_mission_display(display_text))
+
+            # Find current index of this record in the pending sub-queue
+            current_pending = store.get_by_status("pending")
+            from_idx = next(
+                (idx for idx, r in enumerate(current_pending) if r.id == record.id),
+                None,
+            )
+            if from_idx is not None:
+                store.reorder_pending(from_idx, i)
+
+    if not displays:
         return "⚠️ Error during reorder."
 
     parts = ["🔀 Reordered queue:"]

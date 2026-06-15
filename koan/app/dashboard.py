@@ -41,15 +41,11 @@ from app.conversation_history import (
     format_conversation_history,
 )
 from app.missions import (
-    cancel_pending_mission,
-    edit_pending_mission,
     extract_project_tag,
     group_by_project,
-    reorder_mission,
 )
 from app.utils import (
     PROJECT_TAG_FULL_RE,
-    modify_missions_file,
     parse_project,
     insert_pending_mission,
     get_known_projects,
@@ -1167,18 +1163,22 @@ def api_missions_reorder():
         return jsonify({"ok": False, "error": "position and target must be integers"}), 400
 
     try:
-        result = {}
-
-        def transform(content):
-            new_content, display = reorder_mission(content, position, target)
-            result["display"] = display
-            return new_content
-
-        modify_missions_file(MISSIONS_FILE, transform)
+        from app.mission_store import locked_store
+        with locked_store(str(INSTANCE_DIR)) as store:
+            record = store.get_pending_at(position - 1)
+            if record is None:
+                raise ValueError(
+                    f"Invalid position: {position}. Check how many pending missions exist."
+                )
+            display = record.text
+            if not store.reorder_pending(position - 1, target - 1):
+                raise ValueError(
+                    f"Invalid target: {target}. Check the pending mission count."
+                )
         missions = parse_missions()
         return jsonify({
             "ok": True,
-            "display": result.get("display", ""),
+            "display": display,
             "pending": missions["pending"],
         })
     except ValueError as e:
@@ -1195,15 +1195,18 @@ def api_missions_cancel():
         return jsonify({"ok": False, "error": "Missing position"}), 400
 
     try:
-        result = {}
-
-        def transform(content):
-            new_content, cancelled = cancel_pending_mission(content, str(int(position)))
-            result["cancelled"] = cancelled
-            return new_content
-
-        modify_missions_file(MISSIONS_FILE, transform)
-        cancelled_text = result.get("cancelled", "")
+        from app.mission_store import locked_store
+        with locked_store(str(INSTANCE_DIR)) as store:
+            record = store.get_pending_at(int(position) - 1)
+            if record is None:
+                raise ValueError(
+                    f"Mission #{position} not found. Check the pending mission count."
+                )
+            if record.project:
+                cancelled_text = f"[project:{record.project}] {record.text}"
+            else:
+                cancelled_text = record.text
+            store.cancel(record.text)
         if cancelled_text:
             try:
                 from app.api.mission_index import cancel_by_text
@@ -1238,18 +1241,19 @@ def api_missions_edit():
         return jsonify({"ok": False, "error": "position must be an integer"}), 400
 
     try:
-        result = {}
-
-        def transform(content):
-            new_content, display = edit_pending_mission(content, position, text)
-            result["display"] = display
-            return new_content
-
-        modify_missions_file(MISSIONS_FILE, transform)
+        from app.mission_store import locked_store
+        with locked_store(str(INSTANCE_DIR)) as store:
+            record = store.get_pending_at(position - 1)
+            if record is None:
+                raise ValueError(
+                    f"Invalid position: {position}. Check how many pending missions exist."
+                )
+            store.edit(record.text, text)
+            display = text
         missions = parse_missions()
         return jsonify({
             "ok": True,
-            "display": result.get("display", ""),
+            "display": display,
             "pending": missions["pending"],
         })
     except ValueError as e:

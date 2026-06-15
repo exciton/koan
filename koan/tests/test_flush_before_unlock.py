@@ -159,19 +159,6 @@ class TestUtilsFlush:
         content = missions.read_text()
         assert "test mission" in content
 
-    def test_modify_missions_file_flushes(self, tmp_path):
-        """modify_missions_file flushes before releasing lock."""
-        missions = tmp_path / "missions.md"
-        missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n")
-
-        from app.utils import modify_missions_file
-
-        result = modify_missions_file(missions, lambda c: c + "\n- extra line\n")
-
-        content = missions.read_text()
-        assert "extra line" in content
-        assert "extra line" in result
-
     def test_append_to_outbox_flushes(self, tmp_path):
         """append_to_outbox flushes before releasing lock."""
         outbox = tmp_path / "outbox.md"
