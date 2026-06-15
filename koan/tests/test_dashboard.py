@@ -110,7 +110,9 @@ class TestRoutes:
             }, follow_redirects=True)
             assert resp.status_code == 200
             content = (instance_dir / "missions.md").read_text()
-            assert "[project:koan] New test mission" in content
+            # Project tag is rendered after the mission text by the store.
+            assert "New test mission" in content
+            assert "[project:koan]" in content
 
     def test_add_mission_no_project(self, app_client, instance_dir):
         with patch.object(dashboard, "MISSIONS_FILE", instance_dir / "missions.md"):
@@ -792,7 +794,9 @@ class TestChatSend:
         assert data["ok"] is True
         assert data["type"] == "mission"
         content = (instance_dir / "missions.md").read_text()
-        assert "[project:koan] add feature" in content
+        # Project tag is rendered after the mission text by the store.
+        assert "add feature" in content
+        assert "[project:koan]" in content
 
 
 class TestBuildDashboardPrompt:

@@ -1358,7 +1358,9 @@ class TestQueueAutoFixMissions:
         )
 
         content = missions.read_text()
-        assert "- [project:myproj] /fix https://github.com/o/r/issues/1" in content
+        # Project tag is rendered after the mission text by the store.
+        assert "/fix https://github.com/o/r/issues/1" in content
+        assert "[project:myproj]" in content
 
     def test_critical_only_threshold(self, tmp_path):
         missions = tmp_path / "missions.md"

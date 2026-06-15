@@ -1610,9 +1610,13 @@ class TestExpandComboSkill:
         content = missions_md.read_text()
         assert "/review https://github.com/owner/repo/pull/42" in content
         assert "/rebase https://github.com/owner/repo/pull/42" in content
-        # Both should have project tag
-        assert "[project:koan] /review" in content
-        assert "[project:koan] /rebase" in content
+        # Both should carry the project tag (rendered after the mission text)
+        from app.missions import parse_sections
+        pending = parse_sections(content)["pending"]
+        review_line = next(i for i in pending if "/review " in i)
+        rebase_line = next(i for i in pending if "/rebase " in i)
+        assert "[project:koan]" in review_line
+        assert "[project:koan]" in rebase_line
 
     def test_reviewrebase_alias_works(self, tmp_path):
         """The primary command /reviewrebase should also expand."""

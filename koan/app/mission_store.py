@@ -23,9 +23,10 @@ Locking
 -------
 A sidecar lock file (``.<stem>.lock``) is held exclusively across the full
 load→mutate→save cycle, matching the convention used by
-:func:`app.locked_file.locked_json_modify`.  The in-process thread lock from
-``utils._MISSIONS_LOCK`` is intentionally *not* reused here — the store has
-its own exclusive lock on the JSON file.
+:func:`app.locked_file.locked_json_modify`.  The store carries its own
+module-level in-process thread lock (``_STORE_LOCK``) paired with this file
+lock, so concurrent mutations from multiple threads and processes are both
+serialized.
 
 Migration
 ---------
@@ -48,9 +49,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
-# Module-level in-process lock (mirrors _MISSIONS_LOCK in utils.py).
-# Held alongside the file lock so threads within the same process do not
-# race on the JSON store.
+# Module-level in-process lock. Held alongside the per-instance file lock so
+# threads within the same process do not race on the JSON store.
 _STORE_LOCK = threading.Lock()
 
 # ---------------------------------------------------------------------------
@@ -392,6 +392,63 @@ class MissionStore:
             crash_count=0,
         )
         self._records.append(record)
+        return record
+
+    def insert_pending(self, entry: str, *, urgent: bool = False) -> MissionRecord:
+        """Insert a new pending mission from a raw entry string.
+
+        Mirrors the legacy ``insert_mission()`` positioning semantics used by
+        :func:`app.utils.insert_pending_mission`: parses an optional
+        ``[project:X]`` tag into the record's project field, strips lifecycle
+        markers from the text, and inserts at the top (``urgent=True``) or the
+        bottom of the pending sub-queue.
+
+        Unlike :meth:`add`, this does **not** dedup by canonical key — two
+        missions with identical text both get inserted.  Signature-based dedup
+        (e.g. ``/rebase`` on the same PR URL) is the caller's responsibility.
+
+        Args:
+            entry: Raw mission entry (may carry a ``"- "`` prefix,
+                ``[project:X]`` tag, and lifecycle markers).
+            urgent: When ``True``, insert at the top of the pending queue
+                (next to be picked up) instead of the bottom (FIFO).
+
+        Returns:
+            The newly created :class:`MissionRecord`.
+        """
+        from app.missions import canonical_mission_key  # lazy import
+        from app.utils import parse_project
+
+        project, clean = parse_project(entry)
+        clean_text = canonical_mission_key(clean) or clean.strip()
+
+        record = MissionRecord(
+            id=str(uuid.uuid4()),
+            text=clean_text,
+            status="pending",
+            project=project or "",
+            queued_at=self._now_iso(),
+            started_at=None,
+            completed_at=None,
+            tags=[],
+            complexity=None,
+            crash_count=0,
+        )
+
+        if urgent:
+            # Top of the pending sub-queue: before the first pending record.
+            insert_at = next(
+                (i for i, r in enumerate(self._records) if r.status == "pending"),
+                len(self._records),
+            )
+            self._records.insert(insert_at, record)
+        else:
+            # Bottom of the pending sub-queue. Appending to the end of the
+            # record list always lands after every existing pending record;
+            # the view regroups by status so trailing non-pending records do
+            # not affect the rendered pending order.
+            self._records.append(record)
+
         return record
 
     def start(self, text: str) -> bool:
@@ -1004,8 +1061,9 @@ def locked_store(instance_dir: str) -> Generator[MissionStore, None, None]:
         with locked_store(instance_dir) as store:
             store.start("Fix bug")
 
-    This is the preferred entry point for all callers that previously used
-    ``modify_missions_file()``.
+    This is the canonical entry point for all mission-queue mutations:
+    ``missions.md`` is regenerated from the store on save and is never
+    written directly.
     """
     store = MissionStore(instance_dir)
     lock_path = store._lock_path()

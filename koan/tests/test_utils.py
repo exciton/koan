@@ -339,13 +339,16 @@ class TestResolveProjectNameAndPath:
 class TestInsertPendingMission:
     def test_inserts_into_existing_file(self, tmp_path):
         from app.utils import insert_pending_mission
+        from app.missions import parse_sections
         missions = tmp_path / "missions.md"
         missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n")
 
         insert_pending_mission(missions, "- New task")
         content = missions.read_text()
         assert "- New task" in content
-        assert content.index("- New task") < content.index("## In Progress")
+        # The mission lands in the Pending section, not elsewhere.
+        sections = parse_sections(content)
+        assert any("New task" in item for item in sections["pending"])
 
     def test_creates_file_if_missing(self, tmp_path):
         from app.utils import insert_pending_mission
@@ -403,15 +406,17 @@ class TestInsertPendingMission:
             assert f"- Task {i}" in content, f"Task {i} lost during concurrent insert"
 
     def test_uses_lockfile_not_data_file(self, tmp_path):
-        """Verify the lock is on a .lock file, not on missions.md itself."""
+        """Verify the lock is on a separate sidecar file, not on missions.md itself."""
         from app.utils import insert_pending_mission
         missions = tmp_path / "missions.md"
         missions.write_text("# Missions\n\n## Pending\n\n## In Progress\n")
 
         insert_pending_mission(missions, "- Test task")
 
-        lock_file = tmp_path / "missions.lock"
-        assert lock_file.exists(), "Lock file should be created alongside missions.md"
+        # The store holds its lock on a dedicated sidecar so missions.md can be
+        # atomically replaced rather than locked open.
+        lock_file = tmp_path / ".missions-store.lock"
+        assert lock_file.exists(), "Store lock file should be created alongside missions.md"
 
     def test_no_temp_file_left_on_success(self, tmp_path):
         """Atomic write should clean up temp files on success."""
@@ -421,7 +426,8 @@ class TestInsertPendingMission:
 
         insert_pending_mission(missions, "- Clean task")
 
-        temp_files = list(tmp_path.glob(".missions-*"))
+        # atomic_write uses a ".koan-" temp prefix and renames on success.
+        temp_files = list(tmp_path.glob(".koan-*"))
         assert temp_files == [], f"Temp files left behind: {temp_files}"
 
     def test_returns_true_when_inserted(self, tmp_path):

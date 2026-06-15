@@ -299,7 +299,9 @@ class TestHandleMission:
             handle_mission("[project:koan] add tests")
 
         content = missions_file.read_text()
-        assert "- [project:koan] add tests" in content
+        # Project tag is rendered after the mission text by the store.
+        assert "add tests" in content
+        assert "[project:koan]" in content
 
     @patch("app.command_handlers.send_telegram")
     def test_mission_auto_detects_project_from_first_word(self, mock_send, tmp_path):
@@ -313,7 +315,9 @@ class TestHandleMission:
             handle_mission("koan fix the bug")
 
         content = missions_file.read_text()
-        assert "- [project:koan] fix the bug" in content
+        # Project tag is rendered after the mission text by the store.
+        assert "fix the bug" in content
+        assert "[project:koan]" in content
         msg = mock_send.call_args[0][0]
         assert "project: koan" in msg
 

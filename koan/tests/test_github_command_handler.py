@@ -3654,11 +3654,12 @@ class TestTryAssignmentNotification:
                    return_value={"state": "open", "merged": False, "head_sha": "sha-aaaa"}), \
              patch("app.github_notification_tracker.is_review_on_cooldown", return_value=False):
             _try_assignment_notification(review_notification, review_registry, {})
-            # Move first mission out of Pending so only the tracker decides.
+            # The prior review has completed (moved to Done), so the signature
+            # dedup (which only scans Pending + In Progress) no longer blocks a
+            # fresh review — only the head-SHA tracker decides whether to re-queue.
             missions_path.write_text(
-                "# Pending\n\n# In Progress\n\n"
-                "- [project:koan] /review https://github.com/sukria/koan/pull/99 \U0001f4ec\n"
-                "\n# Done\n"
+                "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n"
+                "- [project:koan] /review https://github.com/sukria/koan/pull/99 \U0001f4ec ✅ (2026-06-15 10:00)\n"
             )
 
         # New commits pushed → new head SHA → fresh dedup key → re-review.

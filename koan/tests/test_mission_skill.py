@@ -40,7 +40,7 @@ class TestMissionHandlerNowFlag:
         assert "Mission received" in result
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
-        assert lines[0] == "- existing task"
+        assert lines[0].startswith("- existing task")
         assert lines[1].startswith("- fix the bug")
 
     @patch("app.utils.get_known_projects", return_value=[("koan", "/path")])
@@ -60,7 +60,7 @@ class TestMissionHandlerNowFlag:
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
         assert lines[0].startswith("- fix the bug")
-        assert lines[1] == "- existing task"
+        assert lines[1].startswith("- existing task")
 
     @patch("app.utils.get_known_projects", return_value=[("koan", "/path")])
     @patch("app.utils.detect_project_from_text", return_value=(None, "fix --now the bug"))
@@ -118,8 +118,8 @@ class TestMissionHandlerNowFlag:
         assert "project: koan" in result
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
-        assert lines[0].startswith("- [project:koan] fix auth")
-        assert lines[1] == "- old task"
+        assert "[project:koan]" in lines[0] and "fix auth" in lines[0]
+        assert lines[1].startswith("- old task")
 
     @patch("app.utils.get_known_projects", return_value=[("koan", "/path")])
     @patch("app.utils.detect_project_from_text")
@@ -140,7 +140,7 @@ class TestMissionHandlerNowFlag:
         assert "priority" in result
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
-        assert lines[0].startswith("- [project:koan] fix auth")
+        assert "[project:koan]" in lines[0] and "fix auth" in lines[0]
 
 # ---------------------------------------------------------------------------
 # awake.py — handle_mission with --now
@@ -164,7 +164,7 @@ class TestAwakeHandleMissionNowFlag:
 
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
-        assert lines[0] == "- existing"
+        assert lines[0].startswith("- existing")
         assert lines[1].startswith("- fix something")
 
     @patch("app.command_handlers.send_telegram")
@@ -180,7 +180,7 @@ class TestAwakeHandleMissionNowFlag:
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
         assert lines[0].startswith("- fix something")
-        assert lines[1] == "- existing"
+        assert lines[1].startswith("- existing")
 
     @patch("app.command_handlers.send_telegram")
     def test_now_flag_stripped_from_text(self, mock_send, tmp_path):
@@ -236,7 +236,7 @@ class TestMissionHandlerNowMultiProject:
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
         assert lines[0].startswith("- fix the bug")
-        assert lines[1] == "- old task"
+        assert lines[1].startswith("- old task")
 
     @patch("app.utils.get_known_projects", return_value=MULTI_PROJECTS)
     @patch("app.utils.detect_project_from_text", return_value=(None, "fix the bug"))
@@ -275,7 +275,7 @@ class TestMissionHandlerNowMultiProject:
         assert "project: koan" in result
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
-        assert lines[0].startswith("- [project:koan] fix auth crash")
+        assert "[project:koan]" in lines[0] and "fix auth crash" in lines[0]
 
     @patch("app.utils.get_known_projects", return_value=MULTI_PROJECTS)
     def test_now_with_explicit_project_tag(self, _proj, tmp_path):
@@ -292,7 +292,7 @@ class TestMissionHandlerNowMultiProject:
         assert "project: backend" in result
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
-        assert lines[0].startswith("- [project:backend] deploy hotfix")
+        assert "[project:backend]" in lines[0] and "deploy hotfix" in lines[0]
 
     @patch("app.utils.get_known_projects", return_value=MULTI_PROJECTS)
     @patch("app.utils.detect_project_from_text", return_value=(None, "fix it"))
@@ -354,7 +354,7 @@ class TestMissionHandlerEmDashNow:
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
         assert lines[0].startswith("- fix the bug")
-        assert lines[1] == "- existing task"
+        assert lines[1].startswith("- existing task")
 
     @patch("app.utils.get_known_projects", return_value=MULTI_PROJECTS)
     @patch("app.utils.detect_project_from_text")
@@ -374,7 +374,7 @@ class TestMissionHandlerEmDashNow:
         assert "project: koan" in result
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
-        assert lines[0].startswith("- [project:koan] fix auth")
+        assert "[project:koan]" in lines[0] and "fix auth" in lines[0]
 
     @patch("app.utils.get_known_projects", return_value=MULTI_PROJECTS)
     @patch("app.utils.detect_project_from_text", return_value=(None, "fix the bug"))
@@ -424,7 +424,7 @@ class TestAwakeHandleMissionEmDashNow:
         content = missions.read_text()
         lines = [l for l in content.splitlines() if l.startswith("- ")]
         assert lines[0].startswith("- fix something")
-        assert lines[1] == "- existing"
+        assert lines[1].startswith("- existing")
 
     @patch("app.command_handlers.send_telegram")
     def test_em_dash_now_ack_includes_priority(self, mock_send, tmp_path):

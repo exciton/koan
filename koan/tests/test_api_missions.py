@@ -508,9 +508,11 @@ class TestEditMission:
         )
         mission_id = resp.get_json()["id"]
 
+        # Inject a second identical pending entry directly into the Pending
+        # section to create an ambiguous match.
         content = (instance_dir / "missions.md").read_text()
         content = content.replace(
-            "## In Progress", "- Duplicate task\n\n## In Progress"
+            "## Pending\n", "## Pending\n\n- Duplicate task\n", 1
         )
         (instance_dir / "missions.md").write_text(content)
 
@@ -647,9 +649,11 @@ class TestReorderMission:
         )
         mission_id = resp.get_json()["id"]
 
+        # Inject a second identical pending entry directly into the Pending
+        # section to create an ambiguous match.
         content = (instance_dir / "missions.md").read_text()
         content = content.replace(
-            "## In Progress", "- Dup reorder\n\n## In Progress"
+            "## Pending\n", "## Pending\n\n- Dup reorder\n", 1
         )
         (instance_dir / "missions.md").write_text(content)
 

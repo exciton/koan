@@ -55,24 +55,19 @@ producing a false "mission was found and finalized" signal.
 
 ### What to do
 
-Return a tuple or use a mutable closure cell:
+Use the store mutators, which already return an explicit `found: bool`:
 
 ```python
-# Good — explicit flag set inside the transform closure
-found = [False]
-def _transform(content: str) -> str:
-    result = _remove_pending_by_text(content, needle)
-    if result is not None:
-        found[0] = True
-        return result[0]
-    return content
-modify_missions_file(path, _transform)
-return found[0]
+# Good — store mutators return an explicit found flag
+with locked_store(instance_dir) as store:
+    found = store.complete(needle)   # start()/fail()/cancel()/edit() also return bool
+return found
 
 # Bad — infers found from content diff (breaks when pruning fires)
-before = path.read_text()
-modify_missions_file(path, _transform)
-after = path.read_text()
+before = missions_path.read_text()
+with locked_store(instance_dir) as store:
+    store.complete(needle)
+after = missions_path.read_text()
 return before != after          # Wrong: also True when only pruning changed it
 ```
 
@@ -98,7 +93,7 @@ wasn't — leading to silent drift and potential behavioral divergence.
 
 - Mission identity stripping → `missions.canonical_mission_key()`
 - Outbox appending → `utils.append_to_outbox()`
-- Missions file modification → `utils.modify_missions_file()`
+- Missions queue mutation → `mission_store.locked_store()` (regenerates `missions.md`; never write it directly)
 - JSON tracker reads/writes → `app.locked_file.locked_json_read/modify`
 
 When you find yourself writing a regex that strips `⏳|▶|✅|❌|[r:N]`, stop

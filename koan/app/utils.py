@@ -7,7 +7,7 @@ Core shared utilities used across modules:
 - load_config: config.yaml loading
 - parse_project: [project:name] / [projet:name] tag extraction
 - atomic_write: crash-safe file writes
-- insert_pending_mission: append mission to missions.md pending section
+- insert_pending_mission: queue a mission via the mission store (regenerates missions.md)
 - get_known_projects / resolve_project_path: project registry
 - append_to_outbox: outbox file appending
 
@@ -24,7 +24,6 @@ import stat
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import yaml
 from pathlib import Path
@@ -56,9 +55,6 @@ PROJECT_HINT_RE = re.compile(rf'\(?\s*projec?t\s*:\s*([{PROJECT_NAME_CHARS}]+)\s
 # Anchored to end (and requires leading whitespace) so a "project:" mid-sentence
 # is never misread as a tag — used as a lenient fallback for command input.
 PROJECT_TRAILING_HINT_RE = re.compile(rf'\s+projec?t:([{PROJECT_NAME_CHARS}]+)\s*$', re.IGNORECASE)
-
-_MISSIONS_DEFAULT = "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n"
-_MISSIONS_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -566,88 +562,38 @@ def _build_footer(skipped: list[str], kept_count: int) -> str:
 
 
 
-def _locked_missions_rw(missions_path: Path, transform):
-    """Read-modify-write missions.md with crash-safe atomic writes.
-
-    Uses a separate lock file for cross-process synchronization so that
-    the data file can be replaced atomically via temp + rename. A process
-    crash between truncate() and write() previously risked leaving
-    missions.md empty; this pattern eliminates that window entirely.
-
-    Args:
-        missions_path: Path to missions.md
-        transform: Callable(content: str) -> str that returns modified content.
-
-    Returns the transformed content.
-    """
-    lock_path = missions_path.with_suffix(".lock")
-    missions_path = Path(missions_path)
-
-    with _MISSIONS_LOCK:
-        # Ensure parent directory exists (for first-run or test scenarios)
-        missions_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(lock_path, "w") as lock_f:
-            fcntl.flock(lock_f, fcntl.LOCK_EX)
-            try:
-                # Read current content (or default if missing/empty)
-                if missions_path.exists():
-                    content = missions_path.read_text(encoding="utf-8")
-                else:
-                    content = ""
-                if not content.strip():
-                    content = _MISSIONS_DEFAULT
-
-                new_content = transform(content)
-
-                # Atomic write: temp file + rename (same dir = same filesystem)
-                fd, tmp = tempfile.mkstemp(
-                    dir=str(missions_path.parent), prefix=".missions-",
-                )
-                try:
-                    with os.fdopen(fd, "w", encoding="utf-8") as f:
-                        f.write(new_content)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.replace(tmp, str(missions_path))
-                except BaseException:
-                    with contextlib.suppress(OSError):
-                        os.unlink(tmp)
-                    raise
-            finally:
-                fcntl.flock(lock_f, fcntl.LOCK_UN)
-
-    return new_content
-
-
 def insert_pending_mission(
     missions_path: Path, entry: str, *, urgent: bool = False,
 ) -> bool:
-    """Insert a mission entry into the pending section of missions.md.
+    """Insert a mission entry into the pending queue via the mission store.
 
     By default, inserts at the bottom of the pending section (FIFO queue).
     When urgent=True, inserts at the top (next to be picked up).
 
-    Uses file locking for the entire read-modify-write cycle to prevent
-    TOCTOU race conditions between awake.py and dashboard.py.
-    Creates the file with default structure if it doesn't exist.
+    The whole load → dedup-check → insert → save cycle runs under the store's
+    exclusive lock (thread + file), so concurrent inserts from awake.py and the
+    dashboard cannot race. missions.md is regenerated from the store on save —
+    it is never written directly.
 
     Returns:
         True if the mission was inserted, False if it was a duplicate
         (same command + URL already pending or in progress).
     """
-    from app.missions import insert_mission, is_duplicate_mission
+    from app.missions import is_duplicate_mission
+    from app.mission_store import locked_store
 
+    instance_dir = str(Path(missions_path).parent)
     inserted = True
 
-    def _transform(content: str) -> str:
-        nonlocal inserted
-        if is_duplicate_mission(content, entry):
+    with locked_store(instance_dir) as store:
+        # Signature-based dedup (e.g. /rebase on the same PR URL) against the
+        # current pending + in-progress view. Non-GitHub missions have no
+        # signature and are never deduped here.
+        if is_duplicate_mission(store.generate_view(), entry):
             inserted = False
-            return content
-        return insert_mission(content, entry, urgent=urgent)
+        else:
+            store.insert_pending(entry, urgent=urgent)
 
-    _locked_missions_rw(missions_path, _transform)
     return inserted
 
 
