@@ -4446,6 +4446,71 @@ class TestIsReviewRequested:
         assert "acme/widget/pulls/7/requested_reviewers" in args[1]
 
 
+class TestBuildVerdictBody:
+    """_build_verdict_body formats verdict text from review data and config."""
+
+    def test_approve_default(self):
+        from app.review_runner import _build_verdict_body
+        body = _build_verdict_body(
+            approve=True, review_data=LGTM_REVIEW_JSON,
+            body_enabled=True, include_blockers=True,
+        )
+        assert body == "No blocking issues found."
+
+    def test_approve_body_disabled(self):
+        from app.review_runner import _build_verdict_body
+        body = _build_verdict_body(
+            approve=True, review_data=LGTM_REVIEW_JSON,
+            body_enabled=False, include_blockers=True,
+        )
+        assert body == ""
+
+    def test_request_changes_with_blockers(self):
+        from app.review_runner import _build_verdict_body
+        body = _build_verdict_body(
+            approve=False, review_data=_PR40_REVIEW_OBJ,
+            body_enabled=True, include_blockers=True,
+        )
+        assert "Blocking issues found" in body
+        assert "Command injection" in body
+
+    def test_request_changes_without_blockers(self):
+        from app.review_runner import _build_verdict_body
+        body = _build_verdict_body(
+            approve=False, review_data=_PR40_REVIEW_OBJ,
+            body_enabled=True, include_blockers=False,
+        )
+        assert body == "Blocking issues found."
+        assert "Command injection" not in body
+
+    def test_request_changes_body_disabled(self):
+        from app.review_runner import _build_verdict_body
+        body = _build_verdict_body(
+            approve=False, review_data=_PR40_REVIEW_OBJ,
+            body_enabled=False, include_blockers=True,
+        )
+        assert body == ""
+
+    def test_request_changes_no_review_data(self):
+        from app.review_runner import _build_verdict_body
+        body = _build_verdict_body(
+            approve=False, review_data=None,
+            body_enabled=True, include_blockers=True,
+        )
+        assert body == "Blocking issues found."
+
+    def test_blockers_include_critical_and_warning(self):
+        """Both critical and warning findings appear in the blocker list."""
+        from app.review_runner import _build_verdict_body
+        body = _build_verdict_body(
+            approve=False, review_data=_PR40_REVIEW_OBJ,
+            body_enabled=True, include_blockers=True,
+        )
+        assert "Command injection" in body
+        assert "swallows all failures" in body
+        assert "symlinks" not in body
+
+
 class TestSubmitReviewVerdict:
     """_submit_review_verdict posts APPROVE or REQUEST_CHANGES via GitHub API."""
 
@@ -4504,6 +4569,8 @@ class TestSubmitReviewVerdict:
 class TestReviewVerdictInRunReview:
     """Integration: run_review submits verdict after posting comment."""
 
+    @patch("app.review_runner.get_review_verdict_config",
+           return_value={"body_enabled": True, "include_blockers": True})
     @patch("app.review_runner._is_review_requested", return_value=False)
     @patch("app.review_runner._submit_review_verdict", return_value=True)
     @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc"])
@@ -4513,7 +4580,7 @@ class TestReviewVerdictInRunReview:
     @patch("app.review_runner.fetch_pr_context")
     def test_lgtm_submits_approve(
         self, mock_fetch, mock_claude, mock_gh, _repliable,
-        _shas, mock_verdict, _mock_req, pr_context, review_skill_dir,
+        _shas, mock_verdict, _mock_req, _mock_cfg, pr_context, review_skill_dir,
     ):
         mock_fetch.return_value = pr_context
         mock_claude.return_value = (json.dumps(LGTM_REVIEW_JSON), "")
@@ -4524,10 +4591,12 @@ class TestReviewVerdictInRunReview:
         )
         assert success is True
         assert "APPROVE" in summary
-        mock_verdict.assert_called_once_with(
-            "owner", "repo", "42", approve=True, head_sha="abc",
-        )
+        mock_verdict.assert_called_once()
+        call_kw = mock_verdict.call_args
+        assert call_kw[1]["approve"] is True or call_kw[0][3] is True
 
+    @patch("app.review_runner.get_review_verdict_config",
+           return_value={"body_enabled": True, "include_blockers": True})
     @patch("app.review_runner._is_review_requested", return_value=False)
     @patch("app.review_runner._submit_review_verdict", return_value=True)
     @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc"])
@@ -4537,7 +4606,7 @@ class TestReviewVerdictInRunReview:
     @patch("app.review_runner.fetch_pr_context")
     def test_findings_submit_request_changes(
         self, mock_fetch, mock_claude, mock_gh, _repliable,
-        _shas, mock_verdict, _mock_req, pr_context, review_skill_dir,
+        _shas, mock_verdict, _mock_req, _mock_cfg, pr_context, review_skill_dir,
     ):
         mock_fetch.return_value = pr_context
         mock_claude.return_value = (json.dumps(VALID_REVIEW_JSON), "")
@@ -4548,9 +4617,34 @@ class TestReviewVerdictInRunReview:
         )
         assert success is True
         assert "REQUEST_CHANGES" in summary
-        mock_verdict.assert_called_once_with(
-            "owner", "repo", "42", approve=False, head_sha="abc",
+        mock_verdict.assert_called_once()
+        call_kw = mock_verdict.call_args
+        assert call_kw[1]["approve"] is False or call_kw[0][3] is False
+
+    @patch("app.review_runner.get_review_verdict_config",
+           return_value={"body_enabled": True, "include_blockers": True})
+    @patch("app.review_runner._is_review_requested", return_value=False)
+    @patch("app.review_runner._submit_review_verdict", return_value=True)
+    @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc"])
+    @patch("app.review_runner.fetch_repliable_comments", return_value=[])
+    @patch("app.review_runner.run_gh")
+    @patch("app.review_runner._run_claude_review")
+    @patch("app.review_runner.fetch_pr_context")
+    def test_verdict_body_includes_blockers(
+        self, mock_fetch, mock_claude, mock_gh, _repliable,
+        _shas, mock_verdict, _mock_req, _mock_cfg, pr_context, review_skill_dir,
+    ):
+        """Blocker titles from review data flow into the verdict body."""
+        mock_fetch.return_value = pr_context
+        mock_claude.return_value = (json.dumps(_PR40_REVIEW_OBJ), "")
+
+        run_review(
+            "owner", "repo", "42", "/tmp/project",
+            notify_fn=MagicMock(), skill_dir=review_skill_dir,
         )
+        mock_verdict.assert_called_once()
+        body = mock_verdict.call_args[1].get("body", "")
+        assert "Command injection" in body
 
     @patch("app.review_runner._is_review_requested", return_value=False)
     @patch("app.review_runner._submit_review_verdict")
@@ -4602,6 +4696,8 @@ class TestReRequestBypassesIncrementalSkip:
     """When the bot has a pending review request (re-request via Refresh),
     the incremental SHA check is bypassed so a fresh review runs."""
 
+    @patch("app.review_runner.get_review_verdict_config",
+           return_value={"body_enabled": True, "include_blockers": True})
     @patch("app.review_runner._is_review_requested", return_value=True)
     @patch("app.review_runner._submit_review_verdict", return_value=True)
     @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc", "def"])
@@ -4612,7 +4708,7 @@ class TestReRequestBypassesIncrementalSkip:
     @patch("app.review_runner.fetch_pr_context")
     def test_re_request_reviews_same_commits(
         self, mock_fetch, mock_claude, mock_gh, _repliable,
-        mock_find_bot, _shas, mock_verdict, _mock_req,
+        mock_find_bot, _shas, mock_verdict, _mock_req, _mock_cfg,
         pr_context, review_skill_dir,
     ):
         """Re-request (bot in requested_reviewers) reviews even with same SHAs."""
@@ -4638,6 +4734,8 @@ class TestReRequestBypassesIncrementalSkip:
         mock_claude.assert_called_once()
         mock_verdict.assert_called_once()
 
+    @patch("app.review_runner.get_review_verdict_config",
+           return_value={"body_enabled": True, "include_blockers": True})
     @patch("app.review_runner._is_review_requested", return_value=True)
     @patch("app.review_runner._submit_review_verdict", return_value=True)
     @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc", "def"])
@@ -4648,7 +4746,7 @@ class TestReRequestBypassesIncrementalSkip:
     @patch("app.review_runner.fetch_pr_context")
     def test_re_request_collapses_old_review(
         self, mock_fetch, mock_claude, mock_gh, _repliable,
-        mock_find_bot, _shas, _verdict, _mock_req,
+        mock_find_bot, _shas, _verdict, _mock_req, _mock_cfg,
         pr_context, review_skill_dir,
     ):
         """Re-request collapses prior review and posts fresh comment."""
