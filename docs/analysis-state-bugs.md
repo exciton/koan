@@ -276,13 +276,20 @@ Commit 2 — unified storage (remove `[r:N]` tags from missions.md):
 - `increment_crash_count()` also increments `total_attempts` for combined cap
 - `max_crash_retries` config key (default 3) replaces hardcoded `MAX_RECOVERY_ATTEMPTS`
 - `classify_mission_state()` now takes `crash_count: int` instead of parsing `[r:N]` from mission text
-- Backward compat: legacy `[r:N]` tags in existing missions.md are read for classification but never seeded to tracker; stripped on next write
+- Backward compat: legacy `[r:N]` tags in existing missions.md are read during recovery and, when higher than the tracker's `crash_count`, seeded into the tracker (via `seed_crash_count()`) so the migrated count survives the recovery cycle; the tag itself is stripped on next write
 
 Commit 3 — counter lifetime (preserve in Failed; clear on human retry):
 - Counter is **not** cleared when stagnation cap is hit or mission is escalated to Failed — the human can inspect `.mission-retries.json` to see why the mission stopped
 - Counter is cleared at `start_mission()` time **only when a cap was previously hit** (`stag_count >= max_retry` OR `crash_count >= max_crash_retries` OR `total >= max_total`), signalling a deliberate human retry
 - Ongoing stagnation-retry requeus (count < cap) keep their counter intact so the cap check still fires on the next cycle
 - New `_clear_if_cap_hit()` helper encapsulates the conditional clear logic
+
+Commit 4 — PR review fixes (PR #1961):
+- `_clear_if_cap_hit()` reads the tracker once via `get_retry_info()` and bails out before loading config when the mission has no entry — avoids a config load + 3 separate reads on every new-mission start (it runs on the hot path). Config keys are read directly (no `.get()` fallbacks that could silently drift from the centralized `get_stagnation_config()` defaults)
+- `total_cap` cause tag now embeds the counts: `stagnation:{pattern}:total_cap({total}/{max_total})`, so the Failed entry in missions.md is self-documenting
+- `classify_mission_state()` is now keyword-only, closing the silent positional-breakage footgun introduced when its first argument changed from `str` to `int`
+- Legacy `[r:N]` tags are now *seeded* into the tracker during recovery (see Commit 2 backward-compat note) instead of being read for classification only — without seeding, the next recovery cycle would read only the freshly-incremented tracker value and grant one extra retry during the migration window
+- Documented the intentional counter-preservation-in-Failed behaviour and its bounded orphan-entry limitation (no age-based expiry; reap by deleting `.mission-retries.json`) in the tracker module comment
 
 **Counter clear table:**
 
