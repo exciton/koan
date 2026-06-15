@@ -41,14 +41,11 @@ def _truncate(text: str, max_len: int = 60) -> str:
 def _count_pending_missions(missions_file) -> int:
     """Return the total number of pending missions across all projects."""
     from pathlib import Path
-    from app.missions import parse_sections
+    from app.mission_store import MissionStore
 
-    path = Path(missions_file)
-    if not path.exists():
-        return 0
     try:
-        sections = parse_sections(path.read_text())
-        return len(sections.get("pending", []))
+        store = MissionStore.load(str(Path(missions_file).parent))
+        return len(store.get_by_status("pending"))
     except Exception:
         return 0
 

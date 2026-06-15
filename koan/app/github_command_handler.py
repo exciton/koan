@@ -1097,7 +1097,6 @@ def _try_assignment_notification(
         log.error("GitHub assign: KOAN_ROOT not set")
         return False
 
-    from app.missions import list_pending, parse_sections
     from app.utils import insert_pending_mission
 
     missions_path = Path(koan_root) / "instance" / "missions.md"
@@ -1106,12 +1105,13 @@ def _try_assignment_notification(
     # or in progress.  The in-progress check prevents re-queuing while a
     # review is still running (e.g., a rebase pushes new commits mid-review).
     try:
-        content = missions_path.read_text() if missions_path.exists() else ""
-        sections = parse_sections(content)
-        active = list_pending(content) + sections.get("in_progress", [])
+        from app.mission_store import MissionStore
+
+        store = MissionStore.load(str(missions_path.parent))
+        active = store.get_by_status("pending") + store.get_by_status("in_progress")
         url_lower = web_url.lower()
-        for line in active:
-            if url_lower in line.lower():
+        for record in active:
+            if url_lower in record.text.lower():
                 log.debug(
                     "GitHub assign: mission for %s already active, skipping",
                     web_url,

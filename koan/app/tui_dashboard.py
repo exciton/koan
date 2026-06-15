@@ -966,11 +966,13 @@ class KoanDashboard(App):
         paused = is_paused(str(self.koan_root))
         titles = self._in_progress_missions()
         try:
-            from app.missions import count_pending
+            from app.mission_store import MissionStore
 
-            md = self.koan_root / "instance" / "missions.md"
-            pending_count = count_pending(md.read_text()) if md.exists() else 0
-        except (OSError, PermissionError) as exc:
+            instance_dir = self.koan_root / "instance"
+            pending_count = len(
+                MissionStore.load(str(instance_dir)).get_by_status("pending")
+            )
+        except (OSError, PermissionError, ValueError) as exc:
             self.log(f"pending count failed: {exc}")
             pending_count = 0
         web_on = self._web_running()

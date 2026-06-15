@@ -132,12 +132,9 @@ def _parse_completed_missions(target_date: Optional[date] = None) -> List[str]:
 
 def _count_pending_missions() -> int:
     """Count pending missions."""
-    if not MISSIONS_FILE.exists():
-        return 0
+    from app.mission_store import MissionStore
 
-    from app.missions import count_pending
-
-    return count_pending(MISSIONS_FILE.read_text())
+    return len(MissionStore.load(str(MISSIONS_FILE.parent)).get_by_status("pending"))
 
 
 def generate_report(report_type: str = "morning") -> str:
