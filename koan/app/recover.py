@@ -15,6 +15,15 @@ and the human is notified via Telegram.
 
 All recovery events are logged to instance/recovery.jsonl for forensics.
 
+Complex mission format (### project:X sub-headers in In Progress):
+The ### block format is used for multi-step missions that group related sub-tasks
+under a project sub-header.  Recovery handles these as atomic blocks — the entire
+block is either requeued to Pending or escalated to Failed together.  The block
+boundary ends at the next blank line or the next ### header, whichever comes first.
+This is the primary handler for stale complex missions. The
+_flush_in_progress_to_failed() call inside start_mission() acts as a secondary
+safety net, catching any stale entries recover.py missed.
+
 Usage from shell:
     python3 recover.py /path/to/instance [--dry-run]
 
