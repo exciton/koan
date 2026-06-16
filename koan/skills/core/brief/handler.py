@@ -8,7 +8,13 @@ def handle(ctx):
     args = ctx.args.strip() if ctx.args else ""
     if args == "--schedule":
         return _seed_schedule(ctx.instance_dir)
-    return _build_digest(ctx)
+
+    digest = _build_digest(ctx)
+
+    if "[brief-" in args:
+        _maybe_reschedule(ctx.instance_dir)
+
+    return digest
 
 
 def _build_digest(ctx):
@@ -21,8 +27,6 @@ def _build_digest(ctx):
     _add_mission_summary(parts, instance_dir)
     _add_quota_health(parts, instance_dir)
     _add_journal_highlights(parts, instance_dir)
-
-    _maybe_reschedule(instance_dir)
 
     return "\n".join(parts)
 
