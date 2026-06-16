@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from app.claude_step import resolve_pr_location
-from app.config import get_review_reply_config, is_review_compressor_enabled
+from app.config import get_review_reply_config, get_review_verdict_config, is_review_compressor_enabled
 from app.run_log import log
 from app.diff_compressor import compress_diff
 from app.github import run_gh, sanitize_github_comment, find_bot_comment
@@ -1530,10 +1530,51 @@ def _is_review_requested(owner: str, repo: str, pr_number: str, bot_username: st
         return False
 
 
+def _build_verdict_body(
+    approve: bool,
+    review_data: Optional[dict],
+    body_enabled: bool = True,
+    include_blockers: bool = True,
+) -> str:
+    """Build body text for a review verdict.
+
+    When *body_enabled* is False, returns ``""`` so the verdict is submitted
+    with an empty body (the APPROVE / REQUEST_CHANGES state still shows in
+    the Reviewers panel).
+
+    When *include_blockers* is True and the verdict is REQUEST_CHANGES,
+    appends a concise bullet list of critical + warning finding titles
+    extracted from the structured review data.
+    """
+    if not body_enabled:
+        return ""
+
+    if approve:
+        return "No blocking issues found."
+
+    base = "Blocking issues found."
+
+    if not include_blockers or not isinstance(review_data, dict):
+        return base
+
+    comments = review_data.get("file_comments") or []
+    blockers = [
+        c["title"]
+        for c in comments
+        if c.get("severity") in ("critical", "warning") and c.get("title")
+    ]
+    if not blockers:
+        return base
+
+    lines = [base, ""]
+    lines.extend(f"- {title}" for title in blockers)
+    return "\n".join(lines)
+
+
 def _submit_review_verdict(
     owner: str, repo: str, pr_number: str,
     approve: bool, head_sha: str,
-    body: str = "",
+    body: Optional[str] = None,
 ) -> bool:
     """Submit a formal PR review verdict (APPROVE or REQUEST_CHANGES).
 
@@ -1547,7 +1588,7 @@ def _submit_review_verdict(
     review was already posted).
     """
     event = "APPROVE" if approve else "REQUEST_CHANGES"
-    review_body = body or (
+    review_body = body if body is not None else (
         "No blocking issues found." if approve
         else "Blocking issues found — see the review comment above."
     )
@@ -1892,10 +1933,18 @@ def run_review(
         review_summary = review_data.get("review_summary") or {}
         lgtm = review_summary.get("lgtm")
         if isinstance(lgtm, bool) and current_shas:
+            verdict_cfg = get_review_verdict_config()
+            verdict_body = _build_verdict_body(
+                approve=lgtm,
+                review_data=review_data,
+                body_enabled=verdict_cfg["body_enabled"],
+                include_blockers=verdict_cfg["include_blockers"],
+            )
             verdict_submitted = _submit_review_verdict(
                 owner, repo, pr_number,
                 approve=lgtm,
                 head_sha=current_shas[-1],
+                body=verdict_body,
             )
 
     # Step 8: Close the PR if the review decided closure is warranted
