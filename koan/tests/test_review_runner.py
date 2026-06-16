@@ -4591,9 +4591,10 @@ class TestReviewVerdictInRunReview:
         )
         assert success is True
         assert "APPROVE" in summary
-        mock_verdict.assert_called_once()
-        call_kw = mock_verdict.call_args
-        assert call_kw[1]["approve"] is True or call_kw[0][3] is True
+        mock_verdict.assert_called_once_with(
+            "owner", "repo", "42", approve=True, head_sha="abc",
+            body="No blocking issues found.",
+        )
 
     @patch("app.review_runner.get_review_verdict_config",
            return_value={"body_enabled": True, "include_blockers": True})
@@ -4617,9 +4618,10 @@ class TestReviewVerdictInRunReview:
         )
         assert success is True
         assert "REQUEST_CHANGES" in summary
-        mock_verdict.assert_called_once()
-        call_kw = mock_verdict.call_args
-        assert call_kw[1]["approve"] is False or call_kw[0][3] is False
+        mock_verdict.assert_called_once_with(
+            "owner", "repo", "42", approve=False, head_sha="abc",
+            body="Blocking issues found.\n\n- Missing validation",
+        )
 
     @patch("app.review_runner.get_review_verdict_config",
            return_value={"body_enabled": True, "include_blockers": True})

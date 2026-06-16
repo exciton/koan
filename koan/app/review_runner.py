@@ -1588,7 +1588,7 @@ def _submit_review_verdict(
     review was already posted).
     """
     event = "APPROVE" if approve else "REQUEST_CHANGES"
-    review_body = body or (
+    review_body = body if body is not None else (
         "No blocking issues found." if approve
         else "Blocking issues found — see the review comment above."
     )
