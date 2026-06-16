@@ -96,16 +96,14 @@ def _has_conflicts(pr: dict) -> bool:
 
 
 def _get_pending_missions_text(instance_dir: Path) -> str:
-    """Read the pending section of missions.md."""
-    missions_path = instance_dir / "missions.md"
-    if not missions_path.exists():
-        return ""
+    """Return pending mission texts joined by newline."""
     try:
-        from app.missions import parse_sections
-        content = missions_path.read_text()
-        sections = parse_sections(content)
-        return "\n".join(sections.get("pending", []))
-    except (OSError, ValueError):
+        from app.mission_store import MissionStore
+        store = MissionStore.load(str(instance_dir))
+        return "\n".join(r.text for r in store.get_by_status("pending"))
+    except Exception as e:
+        import sys
+        print(f"[pr_checkup] error loading mission store: {e}", file=sys.stderr)
         return ""
 
 

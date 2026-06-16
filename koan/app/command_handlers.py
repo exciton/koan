@@ -56,11 +56,11 @@ CORE_COMMANDS = frozenset({
 
 def _has_in_progress_mission() -> bool:
     """Check if any mission is currently in progress."""
-    from app.missions import count_in_progress
     try:
-        content = MISSIONS_FILE.read_text(encoding="utf-8")
-        return count_in_progress(content) > 0
-    except FileNotFoundError:
+        from app.mission_store import MissionStore
+        store = MissionStore.load(str(INSTANCE_DIR))
+        return len(store.get_by_status("in_progress")) > 0
+    except (OSError, ValueError):
         return False
 
 
