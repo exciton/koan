@@ -298,6 +298,67 @@ class TestProcessJiraMention:
         # Original project name not used
         assert "[project:myproject]" not in content
 
+    def test_repo_override_resolves_alias(
+        self, tmp_path, monkeypatch, mention, skill_registry, basic_config
+    ):
+        """repo: token with an alias resolves to the canonical project name."""
+        instance_dir = tmp_path / "instance"
+        instance_dir.mkdir()
+        missions_path = instance_dir / "missions.md"
+        missions_path.write_text("# Pending\n\n# In Progress\n\n# Done\n")
+
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+
+        alias_mention = dict(mention, body_text="@koan-bot plan repo:myalias")
+
+        with patch("app.jira_command_handler.get_jira_nickname", return_value="koan-bot"), \
+             patch("app.jira_command_handler.get_jira_authorized_users", return_value=["*"]), \
+             patch("app.jira_config.get_jira_max_age_hours", return_value=24), \
+             patch("app.utils.resolve_project_alias", return_value="canonical-project"), \
+             patch("app.utils.is_known_project", return_value=True), \
+             patch("app.jira_command_handler.acknowledge_jira_comment", return_value=True), \
+             patch("app.jira_command_handler._notify_mission_from_jira"):
+
+            processed_set = set()
+            success, error = process_jira_mention(
+                alias_mention, skill_registry, basic_config, processed_set,
+            )
+
+        assert success is True
+        content = missions_path.read_text()
+        assert "[project:canonical-project]" in content
+        assert "[project:myalias]" not in content
+
+    def test_repo_override_alias_not_a_project_falls_back_to_known_check(
+        self, tmp_path, monkeypatch, mention, skill_registry, basic_config
+    ):
+        """repo: token that isn't an alias but is a known project works."""
+        instance_dir = tmp_path / "instance"
+        instance_dir.mkdir()
+        missions_path = instance_dir / "missions.md"
+        missions_path.write_text("# Pending\n\n# In Progress\n\n# Done\n")
+
+        monkeypatch.setenv("KOAN_ROOT", str(tmp_path))
+
+        direct_mention = dict(mention, body_text="@koan-bot plan repo:real-project")
+
+        with patch("app.jira_command_handler.get_jira_nickname", return_value="koan-bot"), \
+             patch("app.jira_command_handler.get_jira_authorized_users", return_value=["*"]), \
+             patch("app.jira_config.get_jira_max_age_hours", return_value=24), \
+             patch("app.utils.resolve_project_alias", return_value=None), \
+             patch("app.utils.is_known_project", return_value=True), \
+             patch("app.jira_command_handler.acknowledge_jira_comment", return_value=True), \
+             patch("app.jira_command_handler._notify_mission_from_jira"):
+
+            processed_set = set()
+            success, error = process_jira_mention(
+                direct_mention, skill_registry, basic_config, processed_set,
+            )
+
+        assert success is True
+        content = missions_path.read_text()
+        assert "[project:real-project]" in content
+
     def test_unknown_repo_override_is_processed_without_mission(
         self, tmp_path, monkeypatch, mention, skill_registry, basic_config
     ):
@@ -312,6 +373,7 @@ class TestProcessJiraMention:
 
         with patch("app.jira_command_handler.get_jira_nickname", return_value="koan-bot"), \
              patch("app.jira_config.get_jira_max_age_hours", return_value=24), \
+             patch("app.utils.resolve_project_alias", return_value=None), \
              patch("app.utils.is_known_project", return_value=False):
             processed_set = set()
             success, error = process_jira_mention(

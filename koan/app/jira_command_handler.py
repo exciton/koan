@@ -252,7 +252,14 @@ def process_jira_mention(
             "Jira: repo: override '%s' for comment %s (default: %s)",
             repo_override, comment_id, project_name,
         )
-        from app.utils import is_known_project
+        from app.utils import is_known_project, resolve_project_alias
+
+        canonical = resolve_project_alias(repo_override)
+        if canonical:
+            log.debug(
+                "Jira: resolved alias '%s' → '%s'", repo_override, canonical,
+            )
+            repo_override = canonical
 
         if not is_known_project(repo_override):
             log.warning(
