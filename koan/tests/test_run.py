@@ -6212,21 +6212,20 @@ class TestUpdateMissionInFile:
         assert mission not in content.split("## Pending")[1].split("##")[0]
         assert "issues/15" in content.split("## Done")[1]
 
-    def test_not_found_returns_false_even_when_pruning_changes_content(self, tmp_path):
-        """Regression (B11): a missing mission must report False even if the
-        unconditional history prune mutates the file.
+    def test_not_found_returns_false_and_skips_prune(self, tmp_path):
+        """A missing mission must report False.
 
-        Previously the function inferred success by comparing content before
-        and after the locked write. Because ``prune_completed_sections`` runs
-        regardless of whether the mission was found, an oversized Failed
-        section made the content differ on a genuine no-op — so an absent
-        mission was wrongly reported as moved, masking a stuck mission.
+        Found-status now comes directly from ``complete_mission_checked``
+        rather than from comparing file content before and after the write,
+        so an oversized history can no longer fool the no-op path into
+        reporting success. And because pruning is decoupled — it runs only
+        after a move commits — an absent mission leaves the file untouched.
         """
         from app.run import _update_mission_in_file
 
-        # 35 Failed entries — above the default failed_keep=30 prune threshold,
-        # so the locked write WILL change the file even though the target
-        # mission is absent from Pending and In Progress.
+        # 35 Failed entries — above the default failed_keep=30 prune threshold.
+        # If pruning were still coupled to the locked move, this would mutate
+        # the file even on a no-op; decoupling means it does not.
         failed_entries = "\n".join(
             f"- old failure {i} ❌ (2026-01-01 00:00)" for i in range(35)
         )
@@ -6246,8 +6245,8 @@ class TestUpdateMissionInFile:
 
         # The mission was never present → must report not-found...
         assert result is False
-        # ...even though pruning genuinely changed the file content.
-        assert after != before
+        # ...and pruning, being decoupled, never ran for the no-op.
+        assert after == before
 
 
 class TestStartMissionSanityFlushLog:
@@ -6333,6 +6332,77 @@ class TestStartMissionSanityFlushLog:
         sections = parse_sections(missions.read_text())
         assert "leftover stale" in "\n".join(sections["in_progress"])
         assert "leftover stale" not in "\n".join(sections.get("failed", []))
+
+
+class TestPruneDecoupledFromFinalization:
+    """History pruning is a standalone step, not a finalization side effect."""
+
+    def _missions_with_many_failed(self, tmp_path, n_failed=35):
+        failed_entries = "\n".join(
+            f"- old failure {i} ❌ (2026-01-01 00:00)" for i in range(n_failed)
+        )
+        missions = tmp_path / "instance" / "missions.md"
+        missions.parent.mkdir(parents=True)
+        missions.write_text(
+            "# Missions\n\n## Pending\n\n- /plan finish me\n\n"
+            "## In Progress\n\n"
+            f"## Failed\n\n{failed_entries}\n"
+        )
+        return missions
+
+    def test_finalization_triggers_history_prune(self, tmp_path):
+        """Completing a mission still trims an oversized Failed section..."""
+        from app.run import _update_mission_in_file
+        from app.missions import parse_sections
+
+        missions = self._missions_with_many_failed(tmp_path, n_failed=35)
+        assert _update_mission_in_file(str(missions.parent), "/plan finish me") is True
+
+        sections = parse_sections(missions.read_text())
+        # Default failed_keep=30: the 35 old failures are trimmed to 30.
+        assert len(sections["failed"]) == 30
+        # ...and the mission still moved to Done.
+        assert "/plan finish me" in "\n".join(sections["done"])
+
+    def test_prune_failure_does_not_break_finalization(self, tmp_path):
+        """A pruning error must not roll back or fail the mission move.
+
+        Pruning runs as its own step after the move commits, so even if it
+        blows up the finalization result stands.
+        """
+        from app.run import _update_mission_in_file
+        from app.missions import parse_sections
+
+        missions = self._missions_with_many_failed(tmp_path, n_failed=35)
+
+        with patch(
+            "app.missions.prune_completed_sections",
+            side_effect=RuntimeError("prune boom"),
+        ):
+            result = _update_mission_in_file(str(missions.parent), "/plan finish me")
+
+        # Move succeeded despite the pruning error...
+        assert result is True
+        sections = parse_sections(missions.read_text())
+        assert "/plan finish me" in "\n".join(sections["done"])
+        # ...and the (unpruned) Failed history is intact, not corrupted.
+        assert len(sections["failed"]) == 35
+
+    def test_prune_helper_is_noop_below_threshold(self, tmp_path):
+        """_prune_missions_history leaves a small history untouched."""
+        from app.run import _prune_missions_history
+
+        missions = tmp_path / "instance" / "missions.md"
+        missions.parent.mkdir(parents=True)
+        original = (
+            "# Missions\n\n## Pending\n\n## In Progress\n\n"
+            "## Done\n\n- one done ✅ (2026-01-01 00:00)\n"
+        )
+        missions.write_text(original)
+        _prune_missions_history(str(missions.parent))
+        # Under the keep threshold → content unchanged.
+        from app.missions import parse_sections
+        assert len(parse_sections(missions.read_text())["done"]) == 1
 
 
 # ---------------------------------------------------------------------------

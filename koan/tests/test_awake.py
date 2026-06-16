@@ -3640,7 +3640,7 @@ class TestLoadCachedContext:
         # Mutate file behind cache's back
         f.write_text("Prefers English")
         # Patch stat so mtime appears unchanged → cache hit
-        def fake_stat(self):
+        def fake_stat(self, *args, **kwargs):
             result = MagicMock()
             result.st_mtime = 1.0
             return result
