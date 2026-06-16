@@ -1868,9 +1868,15 @@ def _start_mission_in_file(instance: str, mission_title: str, project_name: str 
                             f"Retry counter NOT cleared for '{clean_title[:60]}' — "
                             "clear failed; mission may re-escalate to Failed on next finalize.")
                 except Exception as e:
-                    log("warning",
+                    # _clear_if_cap_hit only catches ImportError internally and lets
+                    # schema mismatches (e.g. a missing get_retry_info key) propagate —
+                    # those are real bugs, so log at error level with a traceback
+                    # rather than burying them in a warning.
+                    import traceback
+                    log("error",
                         f"Retry counter clear errored for '{clean_title[:60]}' ({e}); "
-                        "mission may re-escalate to Failed on next finalize.")
+                        "mission may re-escalate to Failed on next finalize.\n"
+                        f"{traceback.format_exc()}")
                 return True
         log("warning", f"Mission transition unconfirmed — '{clean_title[:60]}' "
             "not found in In Progress after start_mission(). "
@@ -1984,8 +1990,13 @@ def _finalize_mission(instance: str, mission_title: str, project_name: str, exit
         excerpt = _stagnation_pattern_excerpt or ""
 
         cfg = get_stagnation_config(project_name)
-        max_retry = int(cfg.get("max_retry_on_stagnation", 0))
-        max_total = int(cfg.get("max_total_retries", 0))
+        # Direct key access (no .get() fallback): get_stagnation_config() always
+        # returns every key, so a missing key is a real schema bug that should
+        # surface loudly rather than silently defaulting — and a `0` fallback for
+        # max_retry_on_stagnation would be semantically wrong (0 disables retries;
+        # the actual default is 3). Consistent with _clear_if_cap_hit.
+        max_retry = cfg["max_retry_on_stagnation"]
+        max_total = cfg["max_total_retries"]
         already = get_retry_count(instance, mission_title)
         total = get_total_attempts(instance, mission_title)
         total_cap_hit = max_total > 0 and total >= max_total
