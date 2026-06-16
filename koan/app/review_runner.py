@@ -1574,7 +1574,7 @@ def _build_verdict_body(
 def _submit_review_verdict(
     owner: str, repo: str, pr_number: str,
     approve: bool, head_sha: str,
-    body: str = "",
+    body: Optional[str] = None,
 ) -> bool:
     """Submit a formal PR review verdict (APPROVE or REQUEST_CHANGES).
 
