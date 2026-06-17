@@ -42,7 +42,6 @@ from app.conversation_history import (
 )
 from app.missions import (
     extract_project_tag,
-    group_by_project,
 )
 from app.utils import (
     PROJECT_TAG_FULL_RE,
@@ -424,12 +423,18 @@ def index():
     project_stats = {}
     projects_list = _get_all_project_names()
     if len(projects_list) > 1:
-        by_project = group_by_project(read_file(MISSIONS_FILE))
-        for pname, pdata in by_project.items():
-            project_stats[pname] = {
-                "pending": len(pdata["pending"]),
-                "in_progress": len(pdata["in_progress"]),
-            }
+        try:
+            from app.mission_store import MissionStore
+            store = MissionStore.load(str(INSTANCE_DIR))
+            for status_key in ("in_progress", "pending"):
+                for r in store.get_by_status(status_key):
+                    pname = r.project or "default"
+                    bucket = project_stats.setdefault(
+                        pname, {"pending": 0, "in_progress": 0}
+                    )
+                    bucket[status_key] += 1
+        except Exception as e:
+            logging.warning("Could not load mission store for project stats: %s", e)
 
     # Map structured state to the template's existing state vocabulary
     tpl_state = agent_state["state"]

@@ -873,18 +873,14 @@ class KoanDashboard(App):
     def _in_progress_missions(self) -> list:
         """Return short titles of in-progress missions (best effort)."""
         try:
-            from app.missions import parse_sections, strip_all_lifecycle_markers
+            from app.mission_store import MissionStore
 
-            md = self.koan_root / "instance" / "missions.md"
-            if not md.exists():
-                return []
-            items = parse_sections(md.read_text()).get("in_progress", [])
+            instance_dir = self.koan_root / "instance"
+            store = MissionStore.load(str(instance_dir))
             titles = []
-            for raw in items:
-                line = strip_all_lifecycle_markers(raw).strip().lstrip("-").strip()
-                line = line.splitlines()[0] if line else ""
-                if line:
-                    titles.append(line[:60] + ("…" if len(line) > 60 else ""))
+            for r in store.get_by_status("in_progress"):
+                title = r.display_title()
+                titles.append(title[:60] + ("…" if len(title) > 60 else ""))
             return titles
         except (OSError, PermissionError) as exc:
             self.log(f"mission list failed: {exc}")
