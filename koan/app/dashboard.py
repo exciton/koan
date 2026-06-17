@@ -46,7 +46,6 @@ from app.missions import (
 from app.utils import (
     PROJECT_TAG_FULL_RE,
     parse_project,
-    insert_pending_mission,
     get_known_projects,
 )
 from app.automation_rules import (
@@ -501,7 +500,13 @@ def add_mission():
     else:
         entry = f"- {text}"
 
-    inserted = insert_pending_mission(MISSIONS_FILE, entry)
+    from app.mission_store import locked_store
+    from app.missions import is_duplicate_mission
+    inserted = False
+    with locked_store(str(INSTANCE_DIR)) as store:
+        if not is_duplicate_mission(store.generate_view(), entry):
+            store.insert_pending(entry)
+            inserted = True
     if inserted:
         try:
             from app.api.mission_index import record_mission
@@ -539,7 +544,13 @@ def chat_send():
         else:
             entry = f"- {mission_text}"
 
-        inserted = insert_pending_mission(MISSIONS_FILE, entry)
+        from app.mission_store import locked_store
+        from app.missions import is_duplicate_mission
+        inserted = False
+        with locked_store(str(INSTANCE_DIR)) as store:
+            if not is_duplicate_mission(store.generate_view(), entry):
+                store.insert_pending(entry)
+                inserted = True
         if inserted:
             try:
                 from app.api.mission_index import record_mission
@@ -1603,19 +1614,21 @@ def api_plan_detail(project, number):
 
 def _find_linked_missions(issue_url: str, issue_number: int) -> list:
     """Find missions that reference the given plan issue URL or number."""
-    content = read_file(MISSIONS_FILE)
-    if not content:
+    try:
+        from app.mission_store import MissionStore
+        store = MissionStore.load(str(MISSIONS_FILE.parent))
+    except (OSError, ValueError):
         return []
 
-    linked = []
     issue_number_str = f"#{issue_number}"
-    for line in content.splitlines():
-        stripped = line.strip().lstrip("- ~")
-        if issue_url and issue_url in line:
-            linked.append(stripped)
-        elif issue_number_str in line and "/plan" in line.lower():
-            linked.append(stripped)
-    return linked[:20]  # cap to avoid huge responses
+    linked = []
+    for r in store.get_by_status("pending") + store.get_by_status("in_progress") + store.get_by_status("done"):
+        text = r.text
+        if issue_url and issue_url in text:
+            linked.append(text)
+        elif issue_number_str in text and "/plan" in text.lower():
+            linked.append(text)
+    return linked[:20]
 
 
 @app.route("/api/status")
