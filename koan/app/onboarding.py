@@ -627,8 +627,11 @@ def _get_config_cli_provider() -> str:
         return ""
     try:
         config = yaml.safe_load(config_file.read_text()) or {}
+        if not isinstance(config, dict):
+            return ""
         return str(config.get("cli_provider", "")).strip().lower()
     except yaml.YAMLError:
+        print(f"  {yellow('⚠')} config.yaml is malformed — treating cli_provider as unset")
         return ""
 
 
@@ -653,8 +656,10 @@ def step_provider(state: OnboardingState) -> OnboardingState:
     provider = PROVIDERS[idx][0]
     state.data["cli_provider"] = provider
     config_file = _instance_dir() / "config.yaml"
-    if config_file.exists():
-        _update_config_yaml_preserving_comments(config_file, ["cli_provider"], provider)
+    if not config_file.exists():
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_file.write_text("")
+    _update_config_yaml_preserving_comments(config_file, ["cli_provider"], provider)
     print(f"  {green('✓')} CLI provider: {provider}")
     return state
 
