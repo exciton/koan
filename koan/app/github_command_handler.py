@@ -1414,9 +1414,12 @@ def process_single_notification(
 
     inserted_any = False
     try:
+        from app.utils import parse_project
         for entry in mission_entries:
+            proj, text = parse_project(entry)
+            text = text.removeprefix("- ")
             inserted_any = insert_pending_mission(
-                notif_instance_dir, entry, urgent=urgent,
+                notif_instance_dir, text, proj or project_name or "", urgent=urgent,
             ) or inserted_any
     except OSError as e:
         log.warning("GitHub: failed to insert mission: %s", e)
