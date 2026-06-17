@@ -177,7 +177,10 @@ def _build_combo_cache(instance_dir: Optional[Path] = None) -> dict:
 def get_combo_sub_commands(command_name: str) -> list:
     """Return the list of sub-commands for a combo skill, or empty list."""
     cache = _build_combo_cache()
-    return list(cache.get(command_name, []))
+    combo = cache.get(command_name)
+    if combo is None:
+        return []
+    return list(combo.commands)
 
 
 # Raw-word project prefix (e.g. "developers.esphome.io /plan ...").
@@ -1128,6 +1131,10 @@ def expand_combo_skill(
     sub-commands. When they arrive in the agent loop (via GitHub @mentions),
     we expand them into separate pending missions.
 
+    When ``parallel=True`` in the skill's SKILL.md, all sub-missions are
+    batch-inserted in a single atomic write via ``modify_missions_file()``.
+    Otherwise, they are inserted one at a time (preserving FIFO ordering).
+
     Args:
         mission_text: The full mission text (e.g. "[project:koan] /rr <url>").
         instance_dir: Path to the instance directory.
@@ -1138,24 +1145,36 @@ def expand_combo_skill(
     """
     project_id, command, args = parse_skill_mission(mission_text)
     cache = _build_combo_cache(Path(instance_dir))
-    sub_commands = cache.get(command)
-    if not sub_commands:
+    combo = cache.get(command)
+    if not combo:
         return False
-
-    from app.utils import insert_pending_mission
 
     missions_path = Path(instance_dir) / "missions.md"
     tag = f"[project:{project_id}] " if project_id else ""
 
-    # Insert sub-missions in order (insert_pending_mission appends to bottom
-    # of Pending by default, so FIFO ordering is preserved).
-    for sub_cmd in sub_commands:
-        entry = f"- {tag}/{sub_cmd} {args}".rstrip()
-        insert_pending_mission(missions_path, entry)
+    if combo.parallel:
+        from app.missions import insert_mission, is_duplicate_mission
+        from app.utils import modify_missions_file
+
+        entries = [f"- {tag}/{sub_cmd} {args}".rstrip() for sub_cmd in combo.commands]
+
+        def _batch_insert(content: str) -> str:
+            for entry in entries:
+                if not is_duplicate_mission(content, entry):
+                    content = insert_mission(content, entry)
+            return content
+
+        modify_missions_file(missions_path, _batch_insert)
+    else:
+        from app.utils import insert_pending_mission
+
+        for sub_cmd in combo.commands:
+            entry = f"- {tag}/{sub_cmd} {args}".rstrip()
+            insert_pending_mission(missions_path, entry)
 
     print(
         f"  Combo skill /{command} expanded into: "
-        + ", ".join(f"/{c}" for c in sub_commands),
+        + ", ".join(f"/{c}" for c in combo.commands),
         file=sys.stderr,
     )
     return True

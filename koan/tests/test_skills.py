@@ -645,6 +645,7 @@ class TestCollectComboSkills:
 
     def test_maps_command_and_aliases_to_sub_commands(self):
         from app.skills import (
+            ComboSkill,
             Skill,
             SkillCommand,
             SkillRegistry,
@@ -659,8 +660,8 @@ class TestCollectComboSkills:
         ))
         mapping = collect_combo_skills(reg)
         assert mapping == {
-            "reviewrebase": ["review", "rebase"],
-            "rr": ["review", "rebase"],
+            "reviewrebase": ComboSkill(["review", "rebase"], False),
+            "rr": ComboSkill(["review", "rebase"], False),
         }
 
     def test_skips_skills_without_sub_commands(self):
