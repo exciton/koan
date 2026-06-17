@@ -28,3 +28,18 @@ def get_version() -> str:
         return desc
     except (OSError, TimeoutExpired):
         return ""
+
+
+def get_branch() -> str:
+    """Return current git branch name for the Kōan source tree."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+            cwd=_KOAN_SRC,
+        )
+        if result.returncode != 0:
+            return ""
+        return result.stdout.strip()
+    except (OSError, TimeoutExpired):
+        return ""
