@@ -781,8 +781,7 @@ class KoanDashboard(App):
             try:
                 from app.utils import insert_pending_mission
 
-                md = self.koan_root / "instance" / "missions.md"
-                ok = insert_pending_mission(md, text_value)
+                ok = insert_pending_mission(self.koan_root / "instance", text_value)
                 self.notify("mission queued" if ok else "duplicate — already queued")
             except (OSError, PermissionError, ImportError, ModuleNotFoundError, AttributeError, ValueError, TypeError) as exc:
                 self.notify(f"queue failed: {exc}", severity="error")

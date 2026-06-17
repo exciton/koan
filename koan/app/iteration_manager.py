@@ -338,8 +338,7 @@ def _inject_recurring(instance_dir: Path):
 
     try:
         from app.recurring import check_and_inject
-        missions_path = instance_dir / "missions.md"
-        return check_and_inject(recurring_path, missions_path)
+        return check_and_inject(recurring_path, instance_dir)
     except (ImportError, OSError, ValueError) as e:
         _log_iteration("error", f"Recurring injection error: {e}")
         return []
@@ -1021,14 +1020,11 @@ def _maybe_inject_diagnostic_mission(
 
     # All gates passed — select diagnostic type and inject
     diag_type = _select_diagnostic_type(instance_dir, project_name)
-    mission_entry = (
-        f"- [autonomous:health] [project:{project_name}] /{diag_type}"
-    )
+    mission_text = f"[autonomous:health] /{diag_type}"
 
     try:
         from app.utils import insert_pending_mission
-        missions_path = Path(instance_dir) / "missions.md"
-        inserted = insert_pending_mission(missions_path, mission_entry)
+        inserted = insert_pending_mission(instance_dir, mission_text, project_name)
     except (ImportError, OSError) as e:
         _log_iteration("error", f"Failed to inject diagnostic mission: {e}")
         return None
@@ -1044,7 +1040,7 @@ def _maybe_inject_diagnostic_mission(
         f"(success_rate={rate:.0%}, staleness={staleness}, "
         f"cooldown={health_cfg['cooldown_days']}d)")
 
-    return mission_entry
+    return f"[project:{project_name}] {mission_text}" if project_name else mission_text
 
 
 FilterResult = namedtuple("FilterResult", ["projects", "pr_limited", "branch_saturated", "focus_gated"],

@@ -169,15 +169,13 @@ def _inject_ci_fix_mission(instance_dir: str, pr_url: str, entry: dict) -> bool:
     """
     from app.utils import insert_pending_mission
 
-    missions_path = Path(instance_dir) / "missions.md"
     project_name = entry.get("project_name") or entry.get("project") or _project_name_from_path(
         entry.get("project_path", "")
     )
-    tag = f"[project:{project_name}] " if project_name else ""
 
-    mission_text = f"- {tag}/ci_check {pr_url}"
+    mission_text = f"/ci_check {pr_url}"
 
-    return insert_pending_mission(missions_path, mission_text, urgent=True)
+    return insert_pending_mission(instance_dir, mission_text, project_name or "", urgent=True)
 
 
 def _project_name_from_path(project_path: str) -> str:

@@ -1099,7 +1099,7 @@ def _try_assignment_notification(
 
     from app.utils import insert_pending_mission
 
-    missions_path = Path(koan_root) / "instance" / "missions.md"
+    assign_instance_dir = Path(koan_root) / "instance"
 
     # Deduplicate: skip if a mission for the same URL is already pending
     # or in progress.  The in-progress check prevents re-queuing while a
@@ -1107,7 +1107,7 @@ def _try_assignment_notification(
     try:
         from app.mission_store import MissionStore
 
-        store = MissionStore.load(str(missions_path.parent))
+        store = MissionStore.load(str(assign_instance_dir))
         active = store.get_by_status("pending") + store.get_by_status("in_progress")
         url_lower = web_url.lower()
         for record in active:
@@ -1125,14 +1125,14 @@ def _try_assignment_notification(
         pass  # If we can't read, proceed with insertion (worst case: a dup)
 
     # Build and insert mission
-    mission_entry = f"- [project:{project_name}] /{command_name} {web_url} 📬"
+    mission_text = f"/{command_name} {web_url} 📬"
     log.info(
         "GitHub assign: queuing /%s from %s notification on %s/%s",
         command_name, reason, owner, repo,
     )
 
     try:
-        inserted = insert_pending_mission(missions_path, mission_entry)
+        inserted = insert_pending_mission(assign_instance_dir, mission_text, project_name)
     except OSError as e:
         log.warning("GitHub assign: failed to insert mission: %s", e)
         mark_notification_read(notif_id)
@@ -1403,7 +1403,7 @@ def process_single_notification(
         log.error("GitHub: KOAN_ROOT not set — cannot insert mission")
         mark_notification_read(str(notification.get("id", "")))
         return False, "KOAN_ROOT not configured"
-    missions_path = Path(koan_root) / "instance" / "missions.md"
+    notif_instance_dir = Path(koan_root) / "instance"
 
     # Combo skills (e.g. /rr) are bridge-side handlers that queue
     # multiple sub-commands. Expand them here instead of relying on
@@ -1416,7 +1416,7 @@ def process_single_notification(
     try:
         for entry in mission_entries:
             inserted_any = insert_pending_mission(
-                missions_path, entry, urgent=urgent,
+                notif_instance_dir, entry, urgent=urgent,
             ) or inserted_any
     except OSError as e:
         log.warning("GitHub: failed to insert mission: %s", e)
@@ -1626,14 +1626,14 @@ def _try_subscription_notification(
         web_url = f"https://github.com/{owner}/{repo}/issues/{issue_number}"
 
     # Queue /reply mission
-    mission_entry = f"- [project:{project_name}] /reply {web_url}"
+    mission_text = f"/reply {web_url}"
     log.info("GitHub subscribe: queuing reply mission for %s", thread_key)
 
     from app.utils import insert_pending_mission
 
-    missions_path = Path(koan_root) / "instance" / "missions.md"
+    subscribe_instance_dir = Path(koan_root) / "instance"
     try:
-        inserted = insert_pending_mission(missions_path, mission_entry)
+        inserted = insert_pending_mission(subscribe_instance_dir, mission_text, project_name)
     except OSError as e:
         log.warning("GitHub subscribe: failed to insert mission: %s", e)
         return False

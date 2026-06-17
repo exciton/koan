@@ -1137,14 +1137,11 @@ def expand_combo_skill(
 
     from app.utils import insert_pending_mission
 
-    missions_path = Path(instance_dir) / "missions.md"
-    tag = f"[project:{project_id}] " if project_id else ""
-
     # Insert sub-missions in order (insert_pending_mission appends to bottom
     # of Pending by default, so FIFO ordering is preserved).
     for sub_cmd in sub_commands:
-        entry = f"- {tag}/{sub_cmd} {args}".rstrip()
-        insert_pending_mission(missions_path, entry)
+        mission_text = f"/{sub_cmd} {args}".rstrip()
+        insert_pending_mission(instance_dir, mission_text, project_id or "")
 
     print(
         f"  Combo skill /{command} expanded into: "

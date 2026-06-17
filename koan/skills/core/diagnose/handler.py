@@ -126,11 +126,10 @@ def _get_journal_context(instance_dir, project, fail_date):
     return None
 
 
-def _is_already_queued(missions_path, failure_text):
+def _is_already_queued(instance_dir, failure_text):
     """Check if a diagnose mission for this failure is already pending."""
     from app.mission_store import MissionStore
 
-    instance_dir = Path(missions_path).parent
     store = MissionStore.load(str(instance_dir))
     needle = failure_text[:80]
     for record in store.get_by_status("pending") + store.get_by_status("in_progress"):
@@ -143,9 +142,7 @@ def _queue_fix_mission(ctx, failure, journal_context):
     """Compose and queue a diagnostic fix mission."""
     from app.utils import insert_pending_mission
 
-    missions_path = Path(ctx.instance_dir) / "missions.md"
-
-    if _is_already_queued(missions_path, failure["text"]):
+    if _is_already_queued(ctx.instance_dir, failure["text"]):
         return "A diagnose mission for this failure is already queued."
 
     parts = ["Diagnose and fix the following failure:"]
@@ -161,10 +158,7 @@ def _queue_fix_mission(ctx, failure, journal_context):
 
     body = "\n".join(parts)
 
-    project_tag = f"[project:{failure['project']}] " if failure["project"] else ""
-    mission_entry = f"- {project_tag}{body}"
-
-    insert_pending_mission(missions_path, mission_entry, urgent=True)
+    insert_pending_mission(ctx.instance_dir, body, failure["project"] or "", urgent=True)
 
     preview = failure["text"][:100]
     cause = f" ({failure['cause_tag']})" if failure["cause_tag"] else ""

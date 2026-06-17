@@ -269,8 +269,8 @@ class TestHandle:
     ):
         mock_get.return_value = [("test", str(tmp_path))]
         handler.handle(ctx)
-        missions_path = mock_insert.call_args[0][0]
-        assert missions_path == ctx.instance_dir / "missions.md"
+        instance_dir_arg = mock_insert.call_args[0][0]
+        assert instance_dir_arg == ctx.instance_dir
 
     @patch("app.utils.get_known_projects")
     @patch("app.utils.insert_pending_mission")

@@ -563,17 +563,15 @@ def _build_footer(skipped: list[str], kept_count: int) -> str:
 
 
 def insert_pending_mission(
-    missions_path: Path, entry: str, *, urgent: bool = False,
+    instance_dir, text: str, project: str = "", *, urgent: bool = False,
 ) -> bool:
-    """Insert a mission entry into the pending queue via the mission store.
+    """Queue a mission into the pending queue via the mission store.
 
-    By default, inserts at the bottom of the pending section (FIFO queue).
-    When urgent=True, inserts at the top (next to be picked up).
-
-    The whole load → dedup-check → insert → save cycle runs under the store's
-    exclusive lock (thread + file), so concurrent inserts from awake.py and the
-    dashboard cannot race. missions.md is regenerated from the store on save —
-    it is never written directly.
+    Args:
+        instance_dir: Path to the instance directory (parent of missions.md).
+        text: Clean mission text — no leading "- " and no "[project:X]" tag.
+        project: Project name, or "" if untagged.
+        urgent: When True, insert at the top of the pending queue (next to run).
 
     Returns:
         True if the mission was inserted, False if it was a duplicate
@@ -582,21 +580,13 @@ def insert_pending_mission(
     from app.missions import is_duplicate_mission
     from app.mission_store import locked_store
 
-    instance_dir = str(Path(missions_path).parent)
     inserted = True
 
-    with locked_store(instance_dir) as store:
-        # Signature-based dedup (e.g. /rebase on the same PR URL) against the
-        # current pending + in-progress view. Non-GitHub missions have no
-        # signature and are never deduped here.
-        if is_duplicate_mission(store.to_markdown(), entry):
+    with locked_store(str(instance_dir)) as store:
+        if is_duplicate_mission(store.to_markdown(), text):
             inserted = False
         else:
-            project, text = parse_project(entry)
-            # Strip leading "- " prefix that callers include in the raw entry string.
-            # Use removeprefix (not lstrip) so mission text starting with "- " is preserved.
-            text = text.removeprefix("- ")
-            store.add(text, project or "", urgent=urgent)
+            store.add(text, project, urgent=urgent)
 
     return inserted
 

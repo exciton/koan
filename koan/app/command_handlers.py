@@ -328,13 +328,7 @@ def _queue_cli_skill_mission(skill: Skill, args: str):
     if mission_args:
         koan_cmd += f" {mission_args}"
 
-    # Format mission entry with optional project tag
-    if project:
-        entry = f"- [project:{project}] {koan_cmd}"
-    else:
-        entry = f"- {koan_cmd}"
-
-    insert_pending_mission(MISSIONS_FILE, entry)
+    insert_pending_mission(INSTANCE_DIR, koan_cmd, project or "")
 
     ack = "✅ Mission queued"
     if project:
@@ -1002,14 +996,8 @@ def handle_mission(text: str):
                 log("guard", f"WARNING mission: {guard_result.reason} | {mission_text[:100]}")
                 quarantine_mission(mission_text, guard_result.reason, source="telegram")
 
-    # Format mission entry with project tag if specified
-    if project:
-        mission_entry = f"- [project:{project}] {mission_text}"
-    else:
-        mission_entry = f"- {mission_text}"
-
     # Append to missions.md under pending section (with file locking)
-    insert_pending_mission(MISSIONS_FILE, mission_entry, urgent=urgent)
+    insert_pending_mission(INSTANCE_DIR, mission_text, project or "", urgent=urgent)
 
     # Acknowledge with project info
     ack_msg = "✅ Mission received"

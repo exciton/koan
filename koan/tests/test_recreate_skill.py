@@ -164,14 +164,14 @@ class TestMissionQueuing:
             assert "[project:myrepo]" in entry
 
     def test_missions_path_uses_instance_dir(self, handler, ctx):
-        """Verify insert_pending_mission is called with the correct missions path."""
+        """Verify insert_pending_mission is called with the correct instance_dir."""
         ctx.args = "https://github.com/sukria/koan/pull/42"
         with patch("app.utils.resolve_project_path", return_value="/home/koan"), \
              patch("app.utils.get_known_projects", return_value=[("koan", "/home/koan")]), \
              patch("app.utils.insert_pending_mission") as mock_insert:
             handler.handle(ctx)
-            missions_path = mock_insert.call_args[0][0]
-            assert missions_path == ctx.instance_dir / "missions.md"
+            instance_dir_arg = mock_insert.call_args[0][0]
+            assert instance_dir_arg == ctx.instance_dir
 
     def test_recreate_ack_includes_repo_info(self, handler, ctx):
         """Ack message should include PR number and repo."""

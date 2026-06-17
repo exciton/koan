@@ -154,7 +154,7 @@ class TestUtilsFlush:
             mock_fcntl.LOCK_EX = 2
             mock_fcntl.LOCK_UN = 8
             # Let flock pass through — we're testing flush ordering
-            insert_pending_mission(missions, "test mission")
+            insert_pending_mission(tmp_path, "test mission")
 
         content = missions.read_text()
         assert "test mission" in content
