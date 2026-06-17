@@ -374,31 +374,30 @@ def _fallback_mission_extract(instance_dir: Path, projects_str: str,
                               context_msg: str):
     """Attempt direct mission extraction when the picker fails or returns empty.
 
-    Safety net that bypasses the Claude-based picker and reads missions.md
-    directly.  Shared by both the "picker returned nothing" and "picker
+    Safety net that bypasses the Claude-based picker and reads the mission
+    store directly.  Shared by both the "picker returned nothing" and "picker
     crashed" branches inside ``_pick_mission()``.
 
     Returns:
         (project_name, mission_title) or (None, None)
     """
     try:
-        from app.missions import count_pending
-        from app.pick_mission import fallback_extract
+        from app.mission_store import MissionStore
 
-        missions_path = instance_dir / "missions.md"
-        try:
-            content = missions_path.read_text()
-        except FileNotFoundError:
-            return None, None
-
-        pending_count = count_pending(content)
-        if pending_count <= 0:
+        store = MissionStore.load(str(instance_dir))
+        pending = store.get_by_status("pending")
+        if not pending:
             return None, None
 
         _log_iteration("error",
-            f"{context_msg} — {pending_count} pending mission(s) exist "
+            f"{context_msg} — {len(pending)} pending mission(s) exist "
             f"— attempting direct extraction")
-        project, title = fallback_extract(content, projects_str)
+        record = pending[0]
+        project = record.project
+        if not project:
+            parts = [p for p in projects_str.split(";") if p]
+            project = parts[0].split(":")[0] if parts else "default"
+        title = record.text
         if project and title:
             _log_iteration("mission",
                 f"Direct fallback picked: [{project}] {title[:60]}")
