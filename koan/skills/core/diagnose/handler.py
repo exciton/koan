@@ -21,9 +21,7 @@ def handle(ctx):
     project_filter = args or None
     if project_filter:
         from app.utils import resolve_project_alias
-        canonical = resolve_project_alias(project_filter)
-        if canonical:
-            project_filter = canonical
+        project_filter = resolve_project_alias(project_filter) or project_filter
 
     instance_dir = Path(ctx.instance_dir)
     missions_path = instance_dir / "missions.md"

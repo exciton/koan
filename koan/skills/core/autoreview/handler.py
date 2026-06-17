@@ -46,19 +46,8 @@ def _resolve_project_name(projects, name):
 
     Returns the canonical name from projects dict, or None.
     """
-    lower = name.lower()
-    for key in projects:
-        if key.lower() == lower:
-            return key
-
-    from app.utils import resolve_project_alias
-    canonical = resolve_project_alias(name)
-    if canonical:
-        for key in projects:
-            if key.lower() == canonical.lower():
-                return key
-
-    return None
+    from app.utils import resolve_project_from_dict
+    return resolve_project_from_dict(projects, name)
 
 
 def _get_autoreview_status(config, project_name):

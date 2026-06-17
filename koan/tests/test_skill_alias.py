@@ -538,18 +538,56 @@ class TestAliasInSkillHandlers:
 
     @patch("app.utils.load_project_aliases", return_value={"tt": "Template2"})
     def test_stats_resolve_alias(self, _aliases, koan_root):
-        from skills.core.stats.handler import _filter_by_days
-        outcomes = [
+        """Stats handler filters by alias — call handle() directly."""
+        import json
+        from datetime import datetime
+
+        instance_dir = koan_root / "instance"
+        outcomes_path = instance_dir / "session_outcomes.json"
+        ts = datetime.now().isoformat()
+        outcomes_path.write_text(json.dumps([
             {"project": "Template2", "mode": "implement",
-             "timestamp": "2026-01-01T00:00:00", "duration_s": 300, "outcome": "done"},
-        ]
-        from app.utils import resolve_project_alias
-        project_filter = "tt"
-        pf_lower = project_filter.lower()
-        filtered = [o for o in outcomes if o.get("project", "").lower() == pf_lower]
-        assert not filtered
-        canonical = resolve_project_alias(project_filter)
-        assert canonical == "Template2"
-        filtered = [o for o in outcomes if o.get("project", "").lower() == canonical.lower()]
-        assert len(filtered) == 1
-        assert filtered[0]["project"] == "Template2"
+             "timestamp": ts, "duration_minutes": 5, "outcome": "productive"},
+        ]))
+
+        from skills.core.stats.handler import handle
+        ctx = MagicMock()
+        ctx.args = "tt"
+        ctx.instance_dir = instance_dir
+        result = handle(ctx)
+        assert "Template2" in result
+
+    @patch("app.utils.get_known_projects",
+           return_value=[("Template2", "/path/t2")])
+    @patch("app.utils.load_project_aliases", return_value={"tt": "Template2"})
+    def test_deepplan_parse_project_alias(self, _aliases, _projects):
+        from skills.core.deepplan.handler import _parse_project_arg
+        project, remainder = _parse_project_arg("tt refactor auth module")
+        assert project == "Template2"
+        assert remainder == "refactor auth module"
+
+    @patch("app.utils.load_project_aliases", return_value={"tt": "Template2"})
+    def test_diagnose_resolve_alias(self, _aliases, koan_root):
+        """Diagnose handler resolves alias for project filter."""
+        instance_dir = koan_root / "instance"
+        missions = instance_dir / "missions.md"
+        missions.write_text(
+            "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n"
+            "## Failed\n\n"
+            "- [project:Template2] fix bug "
+            "❌ (2026-06-15 10:00)\n"
+        )
+        from skills.core.diagnose.handler import handle
+        ctx = MagicMock()
+        ctx.args = "tt"
+        ctx.instance_dir = instance_dir
+        result = handle(ctx)
+        assert "queued" in result.lower() or "fix bug" in result.lower() or "Diagnosis" in result
+
+    def test_gha_audit_resolve_alias(self):
+        """gha_audit _resolve_project_path resolves via alias."""
+        from skills.core.gha_audit.handler import _resolve_project_path
+        with patch("app.utils.resolve_project_name_and_path",
+                   return_value=("Template2", "/path/t2")):
+            result = _resolve_project_path("tt")
+        assert result == "/path/t2"
