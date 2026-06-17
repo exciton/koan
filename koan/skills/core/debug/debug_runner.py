@@ -64,7 +64,8 @@ def _gather_failure_context(instance_dir: str, project_name: str) -> str:
         if len(text) > _MAX_FAILURE_CONTEXT_CHARS:
             text = text[-_MAX_FAILURE_CONTEXT_CHARS:]
         return text
-    except OSError:
+    except OSError as exc:
+        logger.warning("Failed to read journal %s: %s", journal_file, exc)
         return "Could not read journal file."
 
 
@@ -161,6 +162,9 @@ def run_debug(
     if not output:
         return False, "Claude returned empty output."
 
+    from app.commit_conventions import parse_debug_hypothesis
+    hypothesis = parse_debug_hypothesis(output)
+
     pr_url = None
     if owner and repo:
         pr_url = _submit_debug_pr(
@@ -173,21 +177,24 @@ def run_debug(
             base_branch=base_branch,
             project_name=project_name,
             notify_fn=notify_fn,
+            hypothesis=hypothesis,
         )
 
     branch = get_current_branch(project_path)
     on_base_branch = branch in (effective_base_branch, "main", "master")
 
+    hyp_note = f"\nHypothesis: {hypothesis}" if hypothesis else ""
+
     if pr_url:
         notify_fn(
             f"✅ Debug complete for issue {label}"
-            f"{context_label}\nDraft PR: {pr_url}"
+            f"{context_label}{hyp_note}\nDraft PR: {pr_url}"
         )
         summary = f"Debug complete for {label}{context_label}\nDraft PR: {pr_url}"
     elif not on_base_branch:
         notify_fn(
             f"✅ Debug complete for issue {label}"
-            f"{context_label}\nBranch: {branch}"
+            f"{context_label}{hyp_note}\nBranch: {branch}"
         )
         summary = f"Debug complete for {label}{context_label}\nBranch: {branch}"
     else:
@@ -286,18 +293,22 @@ def _submit_debug_pr(
     base_branch: Optional[str] = None,
     project_name: str = "",
     notify_fn=None,
+    hypothesis: Optional[str] = None,
 ) -> Optional[str]:
     """Submit a draft PR for the debug fix."""
     from app.pr_submit import build_koan_footer
 
     branch = get_current_branch(project_path)
     if not branch or branch in ("main", "master"):
+        logger.info("Skipping PR creation: on base branch %s", branch or "(none)")
         return None
 
     footer = build_koan_footer()
+    hypothesis_line = f"\n**Root cause hypothesis:** {hypothesis}\n" if hypothesis else ""
     pr_body = (
         f"## Debug fix for {issue_url}\n\n"
-        f"Structured hypothesis-driven fix for: **{issue_title}**\n\n"
+        f"Structured hypothesis-driven fix for: **{issue_title}**\n"
+        f"{hypothesis_line}\n"
         f"Closes {issue_url}\n\n"
         f"---\n{footer}"
     )

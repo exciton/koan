@@ -210,14 +210,21 @@ def _handle_skill_dispatch(
                 instance, project_name, run_num, max_runs,
                 exit_code, mission_title,
             )
+        was_stagnated = _run._last_mission_stagnated.is_set()
         _run._finalize_mission(instance, mission_title, project_name, exit_code)
 
         if exit_code != 0:
-            _maybe_escalate_to_debug(
-                mission_title=mission_title,
-                exit_code=exit_code,
-                instance=instance,
-            )
+            stagnation_requeued = False
+            if was_stagnated:
+                from app.stagnation_monitor import get_retry_count
+                stagnation_requeued = get_retry_count(instance, mission_title) > 0
+
+            if not stagnation_requeued:
+                _maybe_escalate_to_debug(
+                    mission_title=mission_title,
+                    exit_code=exit_code,
+                    instance=instance,
+                )
 
         _run._commit_instance(instance)
 
@@ -448,6 +455,8 @@ def _maybe_escalate_to_debug(
     inserted = insert_pending_mission(missions_path, entry, urgent=True)
 
     if not inserted:
+        import app.run as _run
+        _run.log("warning", f"Debug escalation skipped (duplicate): {fix_args[:80]}")
         return False
 
     import app.run as _run
