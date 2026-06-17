@@ -593,8 +593,9 @@ def insert_pending_mission(
             inserted = False
         else:
             project, text = parse_project(entry)
-            # Strip leading "- " that callers include in the raw entry string
-            text = text.lstrip("- ").strip()
+            # Strip leading "- " prefix that callers include in the raw entry string.
+            # Use removeprefix (not lstrip) so mission text starting with "- " is preserved.
+            text = text.removeprefix("- ")
             store.add(text, project or "", urgent=urgent)
 
     return inserted
