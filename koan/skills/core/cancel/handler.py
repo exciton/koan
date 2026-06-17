@@ -91,7 +91,7 @@ def _cancel_mission(missions_file, identifier):
                 return f"⚠️ No pending mission matching '{identifier}'."
 
         cancelled_display = record.display_title()
-        store.cancel(record.text)
+        store.cancel_pending(record.text)
 
     return f"🗑 Mission cancelled: {cancelled_display}"
 
@@ -117,7 +117,7 @@ def _cancel_bulk(missions_file, positions):
         displays = []
         for record in records_to_cancel:
             displays.append(record.display_title())
-            store.cancel(record.text)
+            store.cancel_pending(record.text)
 
     parts = ["🗑 Cancelled missions:"]
     parts.extend(f"  • {d}" for d in displays)

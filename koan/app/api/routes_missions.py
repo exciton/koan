@@ -218,7 +218,7 @@ def delete_mission(mission_id: str):
     clean_text = _store_lookup_key(stored_text)
 
     with locked_store(str(_instance_dir())) as store:
-        store.cancel(clean_text)
+        store.cancel_pending(clean_text)
 
     cancel_mission(_instance_dir(), mission_id)
     return jsonify({"id": mission_id, "status": "removed"}), 200

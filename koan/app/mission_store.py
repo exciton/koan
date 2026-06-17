@@ -16,7 +16,7 @@ Architecture
 - Human edits to ``missions.md`` are detected by comparing
   ``sha256(missions.md content)`` against a hash stored alongside the JSON.
   When the hash diverges, :meth:`MissionStore.save` calls
-  :meth:`MissionStore.reconcile_from_markdown` before persisting, so no human
+  :meth:`MissionStore._reconcile_from_markdown` before persisting, so no human
   edit is silently discarded.
 
 Locking
@@ -80,7 +80,7 @@ _STATUS_HEADERS: Dict[str, str] = {
     "failed": "Failed",
 }
 
-# Section render order for generate_view()
+# Section render order for to_markdown()
 _VIEW_ORDER = ["in_progress", "pending", "done", "failed"]
 
 # Caps applied in the generated view (not in the JSON store)
@@ -210,7 +210,7 @@ class MissionStore:
         self._records: List[MissionRecord] = []
         # Ideas backlog (the ``## Ideas`` section). Each item is the idea
         # content with the leading ``- `` stripped. Ideas are never picked up
-        # by the agent loop; the store owns them only so generate_view() does
+        # by the agent loop; the store owns them only so to_markdown() does
         # not destroy the section when it regenerates missions.md.
         self._ideas: List[str] = []
         # sha256 of the last missions.md content we wrote, used to detect
@@ -290,7 +290,7 @@ class MissionStore:
             current_hash = store._view_hash(current_content)
             if store._last_view_hash is not None and current_hash != store._last_view_hash:
                 # Human edited the Markdown view — reconcile back into the store
-                store.reconcile_from_markdown(current_content)
+                store._reconcile_from_markdown(current_content)
 
         return store
 
@@ -306,7 +306,7 @@ class MissionStore:
         """
         from app.utils import atomic_write
 
-        view_content = self.generate_view()
+        view_content = self.to_markdown()
         view_hash = self._view_hash(view_content)
         self._last_view_hash = view_hash
 
@@ -630,7 +630,7 @@ class MissionStore:
     # Reconciliation
     # ------------------------------------------------------------------
 
-    def reconcile_from_markdown(self, markdown: str) -> int:
+    def _reconcile_from_markdown(self, markdown: str) -> int:
         """Update ``self._records`` to match the given Markdown content.
 
         Called when a human edit to ``missions.md`` is detected (hash mismatch).
@@ -711,7 +711,7 @@ class MissionStore:
     # View generation
     # ------------------------------------------------------------------
 
-    def generate_view(self) -> str:
+    def to_markdown(self) -> str:
         """Generate the Markdown content for ``missions.md``.
 
         The output is compatible with all existing parsers (``parse_sections()``,
@@ -883,7 +883,7 @@ class MissionStore:
         record.text = canonical_mission_key(new_text) or new_text.strip()
         return True
 
-    def cancel(self, text: str) -> bool:
+    def cancel_pending(self, text: str) -> bool:
         """Remove a *pending* record (does not affect in_progress/done/failed).
 
         Args:
@@ -919,7 +919,7 @@ class MissionStore:
         without bound.
 
         Keeps the most recent *done_cap* done records and *failed_cap* failed
-        records (matching the view caps used by :meth:`generate_view`).
+        records (matching the view caps used by :meth:`to_markdown`).
 
         Returns:
             Count of records removed.

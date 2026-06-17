@@ -589,7 +589,7 @@ def insert_pending_mission(
         # Signature-based dedup (e.g. /rebase on the same PR URL) against the
         # current pending + in-progress view. Non-GitHub missions have no
         # signature and are never deduped here.
-        if is_duplicate_mission(store.generate_view(), entry):
+        if is_duplicate_mission(store.to_markdown(), entry):
             inserted = False
         else:
             store.insert_pending(entry, urgent=urgent)

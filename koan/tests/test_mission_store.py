@@ -606,7 +606,7 @@ class TestFlushStaleInProgress:
 
 
 # ---------------------------------------------------------------------------
-# reconcile_from_markdown()
+# _reconcile_from_markdown()
 # ---------------------------------------------------------------------------
 
 class TestReconcileFromMarkdown:
@@ -619,7 +619,7 @@ class TestReconcileFromMarkdown:
             "- Fix bug ✅ (2026-06-14 11:00)\n\n"
             "## Pending\n\n"
         )
-        new_count = store.reconcile_from_markdown(md)
+        new_count = store._reconcile_from_markdown(md)
         assert new_count == 0
         assert store.find("Fix bug").status == "done"
 
@@ -629,7 +629,7 @@ class TestReconcileFromMarkdown:
             "## Pending\n\n"
             "- Brand new mission ⏳(2026-06-14T11:00)\n\n"
         )
-        new_count = store.reconcile_from_markdown(md)
+        new_count = store._reconcile_from_markdown(md)
         assert new_count == 1
         assert store.find("Brand new mission") is not None
 
@@ -640,7 +640,7 @@ class TestReconcileFromMarkdown:
             "## Pending\n\n"
             "- Human added ⏳(2026-06-14T11:00)\n\n"
         )
-        store.reconcile_from_markdown(md)
+        store._reconcile_from_markdown(md)
         # "Existing mission" was not in the Markdown — should be preserved
         assert store.find("Existing mission") is not None
 
@@ -653,119 +653,119 @@ class TestReconcileFromMarkdown:
             "- Mission B ⏳(2026-06-14T11:01)\n"
             "- Mission C ⏳(2026-06-14T11:02)\n\n"
         )
-        new_count = store.reconcile_from_markdown(md)
+        new_count = store._reconcile_from_markdown(md)
         assert new_count == 2
 
 
 # ---------------------------------------------------------------------------
-# generate_view()
+# to_markdown()
 # ---------------------------------------------------------------------------
 
 class TestGenerateView:
-    def test_generate_view_has_all_sections(self, store):
+    def test_to_markdown_has_all_sections(self, store):
         store.add("Fix bug")
-        view = store.generate_view()
+        view = store.to_markdown()
         assert "## In Progress" in view
         assert "## Pending" in view
         assert "## Done" in view
         assert "## Failed" in view
 
-    def test_generate_view_section_order(self, store):
-        view = store.generate_view()
+    def test_to_markdown_section_order(self, store):
+        view = store.to_markdown()
         ip_pos = view.index("## In Progress")
         p_pos = view.index("## Pending")
         d_pos = view.index("## Done")
         f_pos = view.index("## Failed")
         assert ip_pos < p_pos < d_pos < f_pos
 
-    def test_generate_view_pending_uses_queued_marker(self, store):
+    def test_to_markdown_pending_uses_queued_marker(self, store):
         store.add("Fix bug")
-        view = store.generate_view()
+        view = store.to_markdown()
         assert "⏳" in view
         assert "Fix bug" in view
 
-    def test_generate_view_in_progress_uses_started_marker(self, store):
+    def test_to_markdown_in_progress_uses_started_marker(self, store):
         store.add("Fix bug")
         store.start("Fix bug")
-        view = store.generate_view()
+        view = store.to_markdown()
         assert "▶" in view
 
-    def test_generate_view_done_uses_checkmark(self, store):
+    def test_to_markdown_done_uses_checkmark(self, store):
         store.add("Fix bug")
         store.start("Fix bug")
         store.complete("Fix bug")
-        view = store.generate_view()
+        view = store.to_markdown()
         assert "✅" in view
 
-    def test_generate_view_failed_uses_cross(self, store):
+    def test_to_markdown_failed_uses_cross(self, store):
         store.add("Fix bug")
         store.start("Fix bug")
         store.fail("Fix bug")
-        view = store.generate_view()
+        view = store.to_markdown()
         assert "❌" in view
 
-    def test_generate_view_includes_project_tag(self, store):
+    def test_to_markdown_includes_project_tag(self, store):
         store.add("Fix bug", project="webapp")
-        view = store.generate_view()
+        view = store.to_markdown()
         assert "[project:webapp]" in view
 
-    def test_generate_view_includes_complexity(self, store):
+    def test_to_markdown_includes_complexity(self, store):
         store.add("Fix bug", complexity="complex")
-        view = store.generate_view()
+        view = store.to_markdown()
         assert "[complexity:complex]" in view
 
-    def test_generate_view_includes_crash_count(self, store):
+    def test_to_markdown_includes_crash_count(self, store):
         store.add("Fix bug")
         store.start("Fix bug")
         store.requeue("Fix bug")
-        view = store.generate_view()
+        view = store.to_markdown()
         assert "[r:1]" in view
 
-    def test_generate_view_includes_fate_tags_in_failed(self, store):
+    def test_to_markdown_includes_fate_tags_in_failed(self, store):
         store.add("Fix bug")
         store.start("Fix bug")
         store.fail("Fix bug", extra_tags=["stagnation"])
-        view = store.generate_view()
+        view = store.to_markdown()
         assert "[stagnation]" in view
 
-    def test_generate_view_caps_done_at_50(self, store):
+    def test_to_markdown_caps_done_at_50(self, store):
         for i in range(60):
             r = store.add(f"Mission {i}")
             r.status = "done"
             r.completed_at = "2026-06-14 10:00"
-        view = store.generate_view()
+        view = store.to_markdown()
         from app.missions import parse_sections
         sections = parse_sections(view)
         assert len(sections["done"]) == 50
 
-    def test_generate_view_caps_failed_at_30(self, store):
+    def test_to_markdown_caps_failed_at_30(self, store):
         for i in range(40):
             r = store.add(f"Mission {i}")
             r.status = "failed"
             r.completed_at = "2026-06-14 10:00"
-        view = store.generate_view()
+        view = store.to_markdown()
         from app.missions import parse_sections
         sections = parse_sections(view)
         assert len(sections["failed"]) == 30
 
-    def test_generate_view_parseable_by_parse_sections(self, store):
+    def test_to_markdown_parseable_by_parse_sections(self, store):
         store.add("Mission A")
         store.add("Mission B", project="myapp")
         store.start("Mission A")
-        view = store.generate_view()
+        view = store.to_markdown()
         from app.missions import parse_sections
         sections = parse_sections(view)
         assert len(sections["in_progress"]) == 1
         assert len(sections["pending"]) == 1
 
-    def test_generate_view_ends_with_newline(self, store):
-        view = store.generate_view()
+    def test_to_markdown_ends_with_newline(self, store):
+        view = store.to_markdown()
         assert view.endswith("\n")
 
-    def test_generate_view_complexity_before_crash_count_before_timestamp(self, store):
+    def test_to_markdown_complexity_before_crash_count_before_timestamp(self, store):
         r = store.add("Fix bug", complexity="simple")
         r.crash_count = 2
-        view = store.generate_view()
+        view = store.to_markdown()
         line = [l for l in view.splitlines() if "Fix bug" in l][0]
         comp_pos = line.find("[complexity:")
         r_pos = line.find("[r:")

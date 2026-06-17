@@ -503,7 +503,7 @@ def add_mission():
     from app.missions import is_duplicate_mission
     inserted = False
     with locked_store(str(INSTANCE_DIR)) as store:
-        if not is_duplicate_mission(store.generate_view(), entry):
+        if not is_duplicate_mission(store.to_markdown(), entry):
             store.insert_pending(entry)
             inserted = True
     if inserted:
@@ -547,7 +547,7 @@ def chat_send():
         from app.missions import is_duplicate_mission
         inserted = False
         with locked_store(str(INSTANCE_DIR)) as store:
-            if not is_duplicate_mission(store.generate_view(), entry):
+            if not is_duplicate_mission(store.to_markdown(), entry):
                 store.insert_pending(entry)
                 inserted = True
         if inserted:
@@ -1225,7 +1225,7 @@ def api_missions_cancel():
                 cancelled_text = f"[project:{record.project}] {record.text}"
             else:
                 cancelled_text = record.text
-            store.cancel(record.text)
+            store.cancel_pending(record.text)
         if cancelled_text:
             try:
                 from app.api.mission_index import cancel_by_text
