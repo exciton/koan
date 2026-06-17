@@ -107,6 +107,7 @@ Skills marked **GitHub @mention** can be triggered by commenting `@koan-bot <com
 | Command | Aliases | Description |
 |---------|---------|-------------|
 | `/status` | `/st` | Show agent state, missions, and loop health |
+| `/brief` | `/digest` | Daily digest — pending, completions, quota, journal highlights |
 | `/ping` | — | Check if the agent loop is alive |
 | `/live` | `/progress` | Show live progress from the current run |
 | `/logs [run\|awake\|all]` | — | Show last 20 lines from logs (default: run) |

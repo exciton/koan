@@ -90,6 +90,7 @@ _CANONICAL_RUNNERS = {
     "spec_audit": "skills.core.spec_audit.spec_audit_runner",
     "explain": "skills.core.explain.explain_runner",
     "deep": "skills.core.deep.deep_runner",
+    "brief": "skills.core.brief.brief_runner",
 }
 
 # Alias -> canonical command name. Declared once, expanded into
@@ -112,6 +113,7 @@ _COMMAND_ALIASES = {
     "xp": "explain",
     "urv": "ultrareview",
     "ultra_review": "ultrareview",
+    "digest": "brief",
 }
 
 # Full mapping including aliases — used for runner module lookup.

@@ -172,6 +172,19 @@ If Kōan misclassifies your message, use `/chat` to force chat mode:
 - `/metrics` — See mission success/failure rates
 </details>
 
+**`/brief`** — Daily digest combining pending missions, recent completions, quota health, and journal highlights in one message.
+
+- **Aliases:** `/digest`
+- **Flags:** `--schedule` seeds the daily auto-delivery chain (via event scheduler)
+
+<details>
+<summary>Use cases</summary>
+
+- `/brief` — Quick morning overview: what happened, what's queued, how's quota
+- `/brief --schedule` — Start daily auto-delivery at 07:00 (self-rescheduling)
+- Copy `instance.example/events/daily-brief.json` to `instance/events/` and update `run_at` for custom timing
+</details>
+
 **`/live`** — See real-time progress from the currently running mission.
 
 - **Aliases:** `/progress`
@@ -2014,6 +2027,7 @@ All commands at a glance. **Tier:** B = Beginner, I = Intermediate, P = Power Us
 | `/abort` | — | B | Abort current mission, pick next pending |
 | `/priority <n>` | — | B | Reorder a pending mission in the queue |
 | `/status` | `/st` | B | Quick status overview |
+| `/brief` | `/digest` | B | Daily digest — pending, completions, quota, journal highlights |
 | `/ping` | — | B | Check if the agent loop is alive |
 | `/usage` | — | B | Detailed quota and progress |
 | `/metrics` | — | B | Mission success rates and reliability stats |
