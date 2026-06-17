@@ -1672,6 +1672,88 @@ class TestExpandComboSkill:
         assert "/review https://github.com/owner/repo/pull/42" in content
         assert "[project:" not in content
 
+    def test_parallel_combo_batch_inserts(self, tmp_path):
+        """Parallel combo skills batch-insert all sub-missions atomically."""
+        missions_md = tmp_path / "missions.md"
+        missions_md.write_text("## Pending\n\n- Existing mission\n\n## In Progress\n\n## Done\n")
+
+        from unittest.mock import patch
+        from app.skills import ComboSkill
+
+        combo_map = {"audit_all": ComboSkill(["security_audit", "dead_code", "profile"], parallel=True)}
+        with patch("app.skill_dispatch._build_combo_cache", return_value=combo_map):
+            result = expand_combo_skill(
+                "[project:koan] /audit_all",
+                str(tmp_path),
+            )
+
+        assert result is True
+        content = missions_md.read_text()
+        assert "[project:koan] /security_audit" in content
+        assert "[project:koan] /dead_code" in content
+        assert "[project:koan] /profile" in content
+        assert "Existing mission" in content
+
+    def test_parallel_combo_deduplicates_url_missions(self, tmp_path):
+        """Parallel combo should skip URL-based sub-missions that are already pending."""
+        url = "https://github.com/owner/repo/pull/42"
+        missions_md = tmp_path / "missions.md"
+        missions_md.write_text(
+            f"## Pending\n\n- [project:koan] /review {url}\n\n## In Progress\n\n## Done\n"
+        )
+
+        from unittest.mock import patch
+        from app.skills import ComboSkill
+
+        combo_map = {"rr": ComboSkill(["review", "rebase"], parallel=True)}
+        with patch("app.skill_dispatch._build_combo_cache", return_value=combo_map):
+            result = expand_combo_skill(
+                f"[project:koan] /rr {url}",
+                str(tmp_path),
+            )
+
+        assert result is True
+        content = missions_md.read_text()
+        assert f"/rebase {url}" in content
+        assert content.count(f"/review {url}") == 1
+
+    def test_parallel_combo_no_project_tag(self, tmp_path):
+        """Parallel combo without project tag omits tag from sub-missions."""
+        missions_md = tmp_path / "missions.md"
+        missions_md.write_text("## Pending\n\n## In Progress\n\n## Done\n")
+
+        from unittest.mock import patch
+        from app.skills import ComboSkill
+
+        combo_map = {"audit_all": ComboSkill(["security_audit", "dead_code"], parallel=True)}
+        with patch("app.skill_dispatch._build_combo_cache", return_value=combo_map):
+            result = expand_combo_skill("/audit_all", str(tmp_path))
+
+        assert result is True
+        content = missions_md.read_text()
+        assert "/security_audit" in content
+        assert "[project:" not in content
+
+    def test_parallel_combo_preserves_existing_pending(self, tmp_path):
+        """Parallel batch insert must not clobber existing pending missions."""
+        missions_md = tmp_path / "missions.md"
+        missions_md.write_text(
+            "## Pending\n\n- Fix login bug\n- Update docs\n\n## In Progress\n\n## Done\n"
+        )
+
+        from unittest.mock import patch
+        from app.skills import ComboSkill
+
+        combo_map = {"audit_all": ComboSkill(["security_audit", "dead_code"], parallel=True)}
+        with patch("app.skill_dispatch._build_combo_cache", return_value=combo_map):
+            expand_combo_skill("[project:koan] /audit_all", str(tmp_path))
+
+        content = missions_md.read_text()
+        assert "Fix login bug" in content
+        assert "Update docs" in content
+        assert "/security_audit" in content
+        assert "/dead_code" in content
+
 
 # ---------------------------------------------------------------------------
 # Auto-discovery fallback

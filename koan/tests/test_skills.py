@@ -687,6 +687,89 @@ class TestCollectComboSkills:
         assert "plan" not in mapping
         assert "rr" in mapping
 
+    def test_returns_combo_skill_namedtuple(self):
+        """collect_combo_skills returns ComboSkill namedtuples."""
+        from app.skills import (
+            ComboSkill,
+            Skill,
+            SkillCommand,
+            SkillRegistry,
+            collect_combo_skills,
+        )
+        reg = SkillRegistry()
+        reg._register(Skill(
+            name="review_rebase",
+            scope="core",
+            sub_commands=["review", "rebase"],
+            commands=[SkillCommand(name="reviewrebase", aliases=["rr"])],
+        ))
+        result = collect_combo_skills(reg)
+        assert "rr" in result
+        assert isinstance(result["rr"], ComboSkill)
+        assert result["rr"].commands == ["review", "rebase"]
+        assert result["rr"].parallel is False
+
+    def test_parallel_flag_propagated(self):
+        """parallel: true in Skill should set ComboSkill.parallel."""
+        from app.skills import (
+            Skill,
+            SkillCommand,
+            SkillRegistry,
+            collect_combo_skills,
+        )
+        reg = SkillRegistry()
+        reg._register(Skill(
+            name="audit_all",
+            scope="core",
+            group="code",
+            sub_commands=["security_audit", "dead_code"],
+            parallel_sub_commands=True,
+            commands=[SkillCommand(name="audit_all")],
+        ))
+        result = collect_combo_skills(reg)
+        assert result["audit_all"].parallel is True
+        assert result["audit_all"].commands == ["security_audit", "dead_code"]
+
+    def test_parallel_parsed_from_skill_md(self, tmp_path):
+        """parallel: true in SKILL.md should set parallel_sub_commands."""
+        from app.skills import parse_skill_md
+
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text(
+            "---\n"
+            "name: audit_all\n"
+            "scope: core\n"
+            "group: code\n"
+            "parallel: true\n"
+            "sub_commands: [security_audit, dead_code, profile]\n"
+            "commands:\n"
+            "  - name: audit_all\n"
+            "    aliases: [aa]\n"
+            "---\n"
+        )
+        skill = parse_skill_md(skill_md)
+        assert skill is not None
+        assert skill.parallel_sub_commands is True
+        assert skill.sub_commands == ["security_audit", "dead_code", "profile"]
+
+    def test_parallel_defaults_to_false(self, tmp_path):
+        """Without parallel flag, parallel_sub_commands should be False."""
+        from app.skills import parse_skill_md
+
+        skill_md = tmp_path / "SKILL.md"
+        skill_md.write_text(
+            "---\n"
+            "name: review_rebase\n"
+            "scope: core\n"
+            "sub_commands: [review, rebase]\n"
+            "commands:\n"
+            "  - name: reviewrebase\n"
+            "---\n"
+        )
+        skill = parse_skill_md(skill_md)
+        assert skill is not None
+        assert skill.parallel_sub_commands is False
+
     def test_sub_commands_parsed_from_skill_md(self, tmp_path):
         from app.skills import parse_skill_md
 
