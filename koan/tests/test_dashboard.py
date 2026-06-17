@@ -31,11 +31,9 @@ def instance_dir(tmp_path):
         "- [project:koan] Build dashboard\n"
         "- Fix something\n\n"
         "## In Progress\n\n"
-        "### Admin Dashboard\n"
-        "- ~~Phase 1~~ done\n"
-        "- Phase 2 pending\n\n"
+        "- Working on admin panel\n\n"
         "## Done\n\n"
-        "- ~~Exploration~~ (session 3)\n"
+        "- Completed exploration\n"
     )
     (inst / "journal" / "2026-02-01" / "koan.md").write_text(
         "## Session 34\nBuilt the dashboard.\n"
@@ -68,7 +66,7 @@ class TestParsingMissions:
         with patch.object(dashboard, "MISSIONS_FILE", instance_dir / "missions.md"):
             result = dashboard.parse_missions()
             assert len(result["pending"]) == 2
-            assert len(result["in_progress"]) == 1  # complex block
+            assert len(result["in_progress"]) == 1
             assert len(result["done"]) == 1
 
     def test_parse_empty(self, tmp_path):

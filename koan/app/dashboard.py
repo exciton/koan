@@ -66,6 +66,7 @@ from app.automation_rules import (
 KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 INSTANCE_DIR = KOAN_ROOT / "instance"
 MISSIONS_FILE = INSTANCE_DIR / "missions.md"
+MISSIONS_JSON_FILE = INSTANCE_DIR / "missions.json"
 OUTBOX_FILE = INSTANCE_DIR / "outbox.md"
 SOUL_FILE = INSTANCE_DIR / "soul.md"
 SUMMARY_FILE = INSTANCE_DIR / "memory" / "summary.md"
@@ -247,14 +248,17 @@ def api_forecast():
 
 
 def parse_missions() -> dict:
-    """Parse missions.md into structured sections."""
-    from app.missions import parse_sections
-
-    content = read_file(MISSIONS_FILE)
-    if not content:
+    """Return missions grouped by status as rendered Markdown lines."""
+    try:
+        from app.mission_store import MissionStore
+        store = MissionStore.load(str(MISSIONS_FILE.parent))
+    except (OSError, ValueError):
         return {"pending": [], "in_progress": [], "done": []}
-
-    return parse_sections(content)
+    return {
+        "pending": [store._render_record(r) for r in store.get_by_status("pending")],
+        "in_progress": [store._render_record(r) for r in store.get_by_status("in_progress")],
+        "done": [store._render_record(r) for r in store.get_by_status("done")],
+    }
 
 
 def _filter_missions_by_project(missions: dict, project: str) -> dict:
@@ -721,8 +725,9 @@ def api_state_stream():
                     state["attention_count"] = 0
                 # Add mission counts (uses mtime check to avoid re-parsing)
                 try:
-                    if MISSIONS_FILE.exists():
-                        mtime = MISSIONS_FILE.stat().st_mtime
+                    store_file = MISSIONS_JSON_FILE if MISSIONS_JSON_FILE.exists() else MISSIONS_FILE
+                    if store_file.exists():
+                        mtime = store_file.stat().st_mtime
                         if mtime != missions_mtime[0]:
                             missions_mtime[0] = mtime
                             m = parse_missions()
