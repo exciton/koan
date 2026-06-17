@@ -651,6 +651,18 @@ class TestIsUnlimitedQuota:
         with _mock_config({"usage": {"unlimited_quota": "yes"}}):
             assert is_unlimited_quota() is True
 
+    def test_non_dict_usage_returns_false(self):
+        from app.config import is_unlimited_quota
+
+        with _mock_config({"usage": "malformed"}):
+            assert is_unlimited_quota() is False
+
+    def test_load_config_error_returns_false(self):
+        from app.config import is_unlimited_quota
+
+        with patch("app.config._load_config", side_effect=OSError("broken")):
+            assert is_unlimited_quota() is False
+
 
 class TestGetMaxRuns:
     def test_default(self):

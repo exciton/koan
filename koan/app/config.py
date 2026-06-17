@@ -685,11 +685,14 @@ def is_unlimited_quota() -> bool:
 
     Config key: usage.unlimited_quota (default: False).
 
-    Safe to call unconditionally — returns False on any internal error.
+    Never raises — returns False on any failure so callers need no wrapping.
     """
     try:
         config = _load_config()
-        return bool(config.get("usage", {}).get("unlimited_quota", False))
+        usage = config.get("usage", {})
+        if not isinstance(usage, dict):
+            return False
+        return bool(usage.get("unlimited_quota", False))
     except Exception as e:
         print(f"[config] is_unlimited_quota error: {e}", file=sys.stderr)
         return False
