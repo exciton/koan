@@ -4005,15 +4005,11 @@ class TestMaybeWarnBurnRate:
     def test_no_warning_when_unlimited_quota(self, _pct, mock_snap_cls,
                                              mock_outbox, _unlimited,
                                              tmp_path):
-        mock_snap = MagicMock()
-        mock_snap.last_warned_at = None
-        mock_snap.time_to_exhaustion.return_value = 10.0
-        mock_snap.burn_rate_pct_per_minute.return_value = 1.0
-        mock_snap_cls.return_value = mock_snap
         inst = tmp_path / "inst"
         inst.mkdir()
         _maybe_warn_burn_rate(inst, tmp_path / "usage.json")
         mock_outbox.assert_not_called()
+        mock_snap_cls.assert_not_called()
 
 
 class TestDowngradeIfBurningFastUnlimitedQuota:
@@ -4021,9 +4017,7 @@ class TestDowngradeIfBurningFastUnlimitedQuota:
     @patch("app.config.is_unlimited_quota", return_value=True)
     @patch("app.burn_rate.BurnRateSnapshot")
     def test_no_downgrade_when_unlimited_quota(self, mock_snap_cls, _unlimited):
-        mock_snap = MagicMock()
-        mock_snap.time_to_exhaustion.return_value = 5.0
-        mock_snap_cls.return_value = mock_snap
         mode, prev = _downgrade_if_burning_fast(Path("/tmp"), 50.0, "deep")
         assert mode == "deep"
         assert prev is None
+        mock_snap_cls.assert_not_called()
