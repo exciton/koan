@@ -1312,7 +1312,7 @@ class TestTryReplyAuthorizedUsers:
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.add_reaction", return_value=True)
     @patch("app.github_command_handler.check_user_permission", return_value=True)
-    @patch("app.github_reply.post_reply", return_value=True)
+    @patch("app.github_reply.post_threaded_reply", return_value=True)
     @patch("app.github_reply.generate_reply", return_value="Here is my reply")
     @patch("app.github_reply.fetch_thread_context", return_value={
         "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
@@ -1363,7 +1363,7 @@ class TestTryReplyAuthorizedUsers:
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.add_reaction", return_value=True)
     @patch("app.github_command_handler.check_user_permission", return_value=True)
-    @patch("app.github_reply.post_reply", return_value=True)
+    @patch("app.github_reply.post_threaded_reply", return_value=True)
     @patch("app.github_reply.generate_reply", return_value="reply")
     @patch("app.github_reply.fetch_thread_context", return_value={
         "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
@@ -1455,7 +1455,7 @@ class TestTryReplyRateLimit:
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.add_reaction", return_value=True)
     @patch("app.github_command_handler.check_user_permission", return_value=True)
-    @patch("app.github_reply.post_reply", return_value=True)
+    @patch("app.github_reply.post_threaded_reply", return_value=True)
     @patch("app.github_reply.generate_reply", return_value="reply")
     @patch("app.github_reply.fetch_thread_context", return_value={
         "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
@@ -1503,7 +1503,7 @@ class TestTryReplyRateLimit:
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.add_reaction", return_value=True)
     @patch("app.github_command_handler.check_user_permission", return_value=True)
-    @patch("app.github_reply.post_reply", return_value=True)
+    @patch("app.github_reply.post_threaded_reply", return_value=True)
     @patch("app.github_reply.generate_reply", return_value="reply")
     @patch("app.github_reply.fetch_thread_context", return_value={
         "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
@@ -2414,7 +2414,7 @@ class TestTryReplyEdgeCases:
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.add_reaction", return_value=True)
     @patch("app.github_command_handler.check_user_permission", return_value=True)
-    @patch("app.github_reply.post_reply", return_value=True)
+    @patch("app.github_reply.post_threaded_reply", return_value=True)
     @patch("app.github_reply.generate_reply", return_value="reply text")
     @patch("app.github_reply.fetch_thread_context", return_value={
         "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
