@@ -504,7 +504,7 @@ def add_mission():
     inserted = False
     with locked_store(str(INSTANCE_DIR)) as store:
         if not is_duplicate_mission(store.to_markdown(), entry):
-            store.insert_pending(entry)
+            store.add(text, project or "")
             inserted = True
     if inserted:
         try:
@@ -548,7 +548,7 @@ def chat_send():
         inserted = False
         with locked_store(str(INSTANCE_DIR)) as store:
             if not is_duplicate_mission(store.to_markdown(), entry):
-                store.insert_pending(entry)
+                store.add(mission_text, project or "")
                 inserted = True
         if inserted:
             try:

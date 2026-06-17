@@ -592,7 +592,10 @@ def insert_pending_mission(
         if is_duplicate_mission(store.to_markdown(), entry):
             inserted = False
         else:
-            store.insert_pending(entry, urgent=urgent)
+            project, text = parse_project(entry)
+            # Strip leading "- " that callers include in the raw entry string
+            text = text.lstrip("- ").strip()
+            store.add(text, project or "", urgent=urgent)
 
     return inserted
 

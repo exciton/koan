@@ -384,6 +384,8 @@ class MissionStore:
         text: str,
         project: str = "",
         complexity: Optional[str] = None,
+        *,
+        urgent: bool = False,
     ) -> MissionRecord:
         """Create a new pending mission record.
 
@@ -395,6 +397,8 @@ class MissionStore:
             text: Clean mission text (no lifecycle markers).
             project: Project name, or ``""`` if untagged.
             complexity: Optional complexity tier string.
+            urgent: When ``True``, insert at the top of the pending queue
+                (next to be picked up) instead of the bottom (FIFO).
 
         Returns:
             The new (or existing) :class:`MissionRecord`.
@@ -420,62 +424,14 @@ class MissionStore:
             complexity=complexity,
             crash_count=0,
         )
-        self._records.append(record)
-        return record
-
-    def insert_pending(self, entry: str, *, urgent: bool = False) -> MissionRecord:
-        """Insert a new pending mission from a raw entry string.
-
-        Mirrors the legacy ``insert_mission()`` positioning semantics used by
-        :func:`app.utils.insert_pending_mission`: parses an optional
-        ``[project:X]`` tag into the record's project field, strips lifecycle
-        markers from the text, and inserts at the top (``urgent=True``) or the
-        bottom of the pending sub-queue.
-
-        Unlike :meth:`add`, this does **not** dedup by canonical key — two
-        missions with identical text both get inserted.  Signature-based dedup
-        (e.g. ``/rebase`` on the same PR URL) is the caller's responsibility.
-
-        Args:
-            entry: Raw mission entry (may carry a ``"- "`` prefix,
-                ``[project:X]`` tag, and lifecycle markers).
-            urgent: When ``True``, insert at the top of the pending queue
-                (next to be picked up) instead of the bottom (FIFO).
-
-        Returns:
-            The newly created :class:`MissionRecord`.
-        """
-        from app.missions import canonical_mission_key  # lazy import
-        from app.utils import parse_project
-
-        project, clean = parse_project(entry)
-        clean_text = canonical_mission_key(clean) or clean.strip()
-
-        record = MissionRecord(
-            id=str(uuid.uuid4()),
-            text=clean_text,
-            status="pending",
-            project=project or "",
-            queued_at=self._now_iso(),
-            started_at=None,
-            completed_at=None,
-            tags=[],
-            complexity=None,
-            crash_count=0,
-        )
 
         if urgent:
-            # Top of the pending sub-queue: before the first pending record.
             insert_at = next(
                 (i for i, r in enumerate(self._records) if r.status == "pending"),
                 len(self._records),
             )
             self._records.insert(insert_at, record)
         else:
-            # Bottom of the pending sub-queue. Appending to the end of the
-            # record list always lands after every existing pending record;
-            # the view regroups by status so trailing non-pending records do
-            # not affect the rendered pending order.
             self._records.append(record)
 
         return record
@@ -997,16 +953,7 @@ class MissionStore:
         from app.utils import parse_project
 
         project, clean = parse_project(idea_text)
-        record = self.add(clean, project or "")
-        # Move to the top of the pending sub-queue (urgent — matches the old
-        # insert_mission(..., urgent=True) behaviour for promoted ideas).
-        if record in self._records:
-            self._records.remove(record)
-        insert_at = next(
-            (i for i, r in enumerate(self._records) if r.status == "pending"),
-            len(self._records),
-        )
-        self._records.insert(insert_at, record)
+        self.add(clean, project or "", urgent=True)
 
     # ------------------------------------------------------------------
     # Migration (classmethod)
