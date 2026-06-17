@@ -64,7 +64,6 @@ from app.automation_rules import (
 
 KOAN_ROOT = Path(os.environ["KOAN_ROOT"])
 INSTANCE_DIR = KOAN_ROOT / "instance"
-MISSIONS_FILE = INSTANCE_DIR / "missions.md"
 MISSIONS_JSON_FILE = INSTANCE_DIR / "missions.json"
 OUTBOX_FILE = INSTANCE_DIR / "outbox.md"
 SOUL_FILE = INSTANCE_DIR / "soul.md"
@@ -250,7 +249,7 @@ def parse_missions() -> dict:
     """Return missions grouped by status as rendered Markdown lines."""
     try:
         from app.mission_store import MissionStore
-        store = MissionStore.load(str(MISSIONS_FILE.parent))
+        store = MissionStore.load(str(INSTANCE_DIR))
     except (OSError, ValueError):
         return {"pending": [], "in_progress": [], "done": []}
     return {
@@ -736,9 +735,8 @@ def api_state_stream():
                     state["attention_count"] = 0
                 # Add mission counts (uses mtime check to avoid re-parsing)
                 try:
-                    store_file = MISSIONS_JSON_FILE if MISSIONS_JSON_FILE.exists() else MISSIONS_FILE
-                    if store_file.exists():
-                        mtime = store_file.stat().st_mtime
+                    if MISSIONS_JSON_FILE.exists():
+                        mtime = MISSIONS_JSON_FILE.stat().st_mtime
                         if mtime != missions_mtime[0]:
                             missions_mtime[0] = mtime
                             m = parse_missions()
@@ -1616,7 +1614,7 @@ def _find_linked_missions(issue_url: str, issue_number: int) -> list:
     """Find missions that reference the given plan issue URL or number."""
     try:
         from app.mission_store import MissionStore
-        store = MissionStore.load(str(MISSIONS_FILE.parent))
+        store = MissionStore.load(str(INSTANCE_DIR))
     except (OSError, ValueError):
         return []
 
