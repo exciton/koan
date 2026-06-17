@@ -37,6 +37,7 @@ from app.github_command_handler import (
     format_help_message,
     get_github_enabled_commands,
     get_github_enabled_commands_with_descriptions,
+    _post_command_acknowledgment,
     post_error_reply,
     process_single_notification,
     resolve_project_from_notification,
@@ -444,6 +445,44 @@ class TestPostErrorReply:
         result2 = post_error_reply("owner", "repo", "42", "123", "Test error")
         assert result2 is True
         assert mock_api.call_count == 2
+
+
+class TestPostCommandAcknowledgment:
+    """Tests for _post_command_acknowledgment — threaded ack replies."""
+
+    @patch("app.github_reply.post_threaded_reply", return_value=True)
+    def test_posts_ack_with_command_name(self, mock_post):
+        comment = {
+            "id": 123,
+            "url": "https://api.github.com/repos/o/r/issues/comments/123",
+            "user": {"login": "alice"},
+            "body": "@bot review",
+        }
+        _post_command_acknowledgment("o", "r", "42", "review", comment, "bot")
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args
+        body_arg = call_kwargs[0][3]
+        assert "`/review`" in body_arg
+        assert "queued" in body_arg
+
+    @patch("app.github_reply.post_threaded_reply", return_value=True)
+    def test_gh_request_gets_natural_language_message(self, mock_post):
+        comment = {
+            "id": 456,
+            "url": "",
+            "user": {"login": "bob"},
+            "body": "@bot what do you think?",
+        }
+        _post_command_acknowledgment("o", "r", "42", "gh_request", comment, "bot")
+        body_arg = mock_post.call_args[0][3]
+        assert "Got it" in body_arg
+        assert "gh_request" not in body_arg
+
+    @patch("app.github_reply.post_threaded_reply", return_value=False)
+    def test_failure_does_not_raise(self, mock_post):
+        """Ack failures should be silent — not block command dispatch."""
+        comment = {"id": 1, "url": "", "user": {"login": "x"}, "body": "y"}
+        _post_command_acknowledgment("o", "r", "42", "review", comment, "bot")
 
 
 class TestProcessSingleNotification:
@@ -1004,7 +1043,7 @@ class TestTryReply:
     @patch("app.github_command_handler.mark_notification_read")
     @patch("app.github_command_handler.add_reaction", return_value=True)
     @patch("app.github_command_handler.check_user_permission", return_value=True)
-    @patch("app.github_reply.post_reply", return_value=True)
+    @patch("app.github_reply.post_threaded_reply", return_value=True)
     @patch("app.github_reply.generate_reply", return_value="Here is my reply")
     @patch("app.github_reply.fetch_thread_context", return_value={
         "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
@@ -1022,7 +1061,7 @@ class TestTryReply:
         )
         assert result is True
         mock_gen.assert_called_once()
-        mock_post.assert_called_once_with("sukria", "koan", "42", "Here is my reply")
+        mock_post.assert_called_once()
         # Should react with eyes emoji (not thumbs up), using comment API URL
         mock_react.assert_called_once_with(
             "sukria", "koan", "55555", emoji="eyes",
@@ -1061,7 +1100,7 @@ class TestTryReply:
     @patch("app.github_command_handler._notify_github_reply")
     @patch("app.github_command_handler._notify_github_question")
     @patch("app.github_command_handler.check_user_permission", return_value=True)
-    @patch("app.github_reply.post_reply", return_value=False)
+    @patch("app.github_reply.post_threaded_reply", return_value=False)
     @patch("app.github_reply.generate_reply", return_value="reply text")
     @patch("app.github_reply.fetch_thread_context", return_value={
         "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
@@ -1119,7 +1158,7 @@ class TestProcessNotificationWithReply:
     @patch("app.github_command_handler.is_notification_stale", return_value=False)
     @patch("app.github_command_handler.get_comment_from_notification")
     @patch("app.github_command_handler.resolve_project_from_notification")
-    @patch("app.github_reply.post_reply", return_value=True)
+    @patch("app.github_reply.post_threaded_reply", return_value=True)
     @patch("app.github_reply.generate_reply", return_value="AI reply here")
     @patch("app.github_reply.fetch_thread_context", return_value={
         "title": "T", "body": "B", "comments": [], "is_pr": False, "diff_summary": "",
