@@ -746,7 +746,7 @@ def queue_auto_fix_missions(
             continue
 
         mission_text = f"/fix {url}"
-        inserted = insert_pending_mission(instance_dir, mission_text, project_name)
+        inserted = insert_pending_mission(mission_text, project_name)
         if inserted:
             queued += 1
 

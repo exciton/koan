@@ -1024,7 +1024,7 @@ def _maybe_inject_diagnostic_mission(
 
     try:
         from app.utils import insert_pending_mission
-        inserted = insert_pending_mission(instance_dir, mission_text, project_name)
+        inserted = insert_pending_mission(mission_text, project_name)
     except (ImportError, OSError) as e:
         _log_iteration("error", f"Failed to inject diagnostic mission: {e}")
         return None

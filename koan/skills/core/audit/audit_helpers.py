@@ -56,7 +56,7 @@ def queue_audit_mission(ctx, project_name, extra_context,
     if auto_fix:
         fix_suffix = f" --auto-fix={auto_fix}" if auto_fix != "high" else " --auto-fix"
     mission_text = f"/{command}{suffix}{limit_suffix}{fix_suffix}"
-    insert_pending_mission(ctx.instance_dir, mission_text, project_name)
+    insert_pending_mission(mission_text, project_name)
 
     # Human-friendly label: "Audit" or "Security audit"
     label = command.replace("_", " ").capitalize()

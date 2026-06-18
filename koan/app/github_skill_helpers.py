@@ -238,7 +238,7 @@ def queue_github_mission(
     if context:
         mission_text += f" {context}"
 
-    return insert_pending_mission(ctx.instance_dir, mission_text, project_name, urgent=urgent)
+    return insert_pending_mission(mission_text, project_name, urgent=urgent)
 
 
 def queue_github_mission_once(

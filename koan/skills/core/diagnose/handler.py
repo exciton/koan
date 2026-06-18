@@ -158,7 +158,7 @@ def _queue_fix_mission(ctx, failure, journal_context):
 
     body = "\n".join(parts)
 
-    insert_pending_mission(ctx.instance_dir, body, failure["project"] or "", urgent=True)
+    insert_pending_mission(body, failure["project"], urgent=True)
 
     preview = failure["text"][:100]
     cause = f" ({failure['cause_tag']})" if failure["cause_tag"] else ""

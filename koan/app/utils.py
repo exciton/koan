@@ -563,14 +563,13 @@ def _build_footer(skipped: list[str], kept_count: int) -> str:
 
 
 def insert_pending_mission(
-    instance_dir, text: str, project: str = "", *, urgent: bool = False,
+    text: str, project: str | None = None, *, urgent: bool = False,
 ) -> bool:
     """Queue a mission into the pending queue via the mission store.
 
     Args:
-        instance_dir: Path to the instance directory (parent of missions.md).
         text: Clean mission text — no leading "- " and no "[project:X]" tag.
-        project: Project name, or "" if untagged.
+        project: Project name, or None/"" if untagged.
         urgent: When True, insert at the top of the pending queue (next to run).
 
     Returns:
@@ -580,9 +579,11 @@ def insert_pending_mission(
     from app.missions import is_duplicate_mission
     from app.mission_store import locked_store
 
+    project = project or ""
+    instance_dir = str(KOAN_ROOT / "instance")
     inserted = True
 
-    with locked_store(str(instance_dir)) as store:
+    with locked_store(instance_dir) as store:
         if is_duplicate_mission(store.to_markdown(), text):
             inserted = False
         else:

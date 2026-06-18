@@ -3627,9 +3627,11 @@ class TestMaybeInjectDiagnosticMission:
     @patch("app.session_tracker.get_staleness_score", return_value=5)
     @patch("app.mission_metrics.compute_project_trend", return_value="declining")
     def test_all_gates_pass_injects_mission(
-        self, _mock_trend, _mock_stale, _mock_rates, _mock_cfg, instance_dir,
+        self, _mock_trend, _mock_stale, _mock_rates, _mock_cfg, instance_dir, monkeypatch,
     ):
         self._make_missions_file(instance_dir)
+        # insert_pending_mission writes to KOAN_ROOT/instance — point it at instance_dir's parent
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         result = _maybe_inject_diagnostic_mission(
             "koan", str(instance_dir), "deep",
         )

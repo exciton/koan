@@ -175,7 +175,7 @@ def _inject_ci_fix_mission(instance_dir: str, pr_url: str, entry: dict) -> bool:
 
     mission_text = f"/ci_check {pr_url}"
 
-    return insert_pending_mission(instance_dir, mission_text, project_name or "", urgent=True)
+    return insert_pending_mission(mission_text, project_name, urgent=True)
 
 
 def _project_name_from_path(project_path: str) -> str:

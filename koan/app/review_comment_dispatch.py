@@ -347,7 +347,7 @@ def check_and_dispatch_review_comments(
 
             try:
                 from app.utils import insert_pending_mission
-                inserted = insert_pending_mission(instance_dir, mission_text, project_name)
+                inserted = insert_pending_mission(mission_text, project_name)
             except (ImportError, OSError) as e:
                 log.warning("Failed to insert review dispatch mission: %s", e)
                 continue

@@ -60,6 +60,6 @@ def _queue_dead_code(ctx, project_name, no_queue):
         project_name = projects[0][0]
 
     suffix = " --no-queue" if no_queue else ""
-    insert_pending_mission(ctx.instance_dir, f"/dead_code{suffix}", project_name)
+    insert_pending_mission(f"/dead_code{suffix}", project_name)
 
     return f"\U0001f50d Dead code scan queued for {project_name}"

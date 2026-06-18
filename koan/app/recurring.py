@@ -557,7 +557,7 @@ def _inject_one(mission: Dict, instance_dir, now: datetime) -> str:
     mission_text = f"{tag}{text}"
 
     # Insert into pending section
-    insert_pending_mission(instance_dir, mission_text, project or "")
+    insert_pending_mission(mission_text, project)
 
     # Update last_run
     mission["last_run"] = now.isoformat(timespec="seconds")

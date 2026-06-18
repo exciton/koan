@@ -390,7 +390,7 @@ def process_jira_mention(
     jira_instance_dir = Path(koan_root) / "instance"
     proj, clean = parse_project(mission_entry)
     try:
-        insert_pending_mission(jira_instance_dir, clean.removeprefix("- "), proj or "")
+        insert_pending_mission(clean.removeprefix("- "), proj)
     except OSError as e:
         log.warning("Jira: failed to insert mission: %s", e)
         return False, f"Failed to queue mission: {e}"

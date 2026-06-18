@@ -37,7 +37,7 @@ def handle(ctx):
 
     context_suffix = f" {focus_context}" if focus_context else ""
     mission_text = f"/ai {name}{context_suffix}"
-    insert_pending_mission(ctx.instance_dir, mission_text, name)
+    insert_pending_mission(mission_text, name)
 
     context_hint = f" (focus: {focus_context})" if focus_context else ""
     return f"AI exploration queued for {name}{context_hint}"

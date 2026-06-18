@@ -60,7 +60,7 @@ def _queue_audit(ctx, project_name, extra_context, max_issues=DEFAULT_MAX_ISSUES
 
     suffix = f" {extra_context}" if extra_context else ""
     limit_suffix = f" limit={max_issues}" if max_issues != DEFAULT_MAX_ISSUES else ""
-    insert_pending_mission(ctx.instance_dir, f"/private_security_audit{suffix}{limit_suffix}", project_name)
+    insert_pending_mission(f"/private_security_audit{suffix}{limit_suffix}", project_name)
 
     context_hint = f" (focus: {extra_context})" if extra_context else ""
     limit_hint = f", limit={max_issues}" if max_issues != DEFAULT_MAX_ISSUES else ""

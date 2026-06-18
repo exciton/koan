@@ -306,7 +306,7 @@ class HookRegistry:
         raw = params.get("text", "Automation rule: create mission")
         from app.utils import insert_pending_mission, parse_project
         proj, clean = parse_project(raw)
-        insert_pending_mission(instance_dir, clean.removeprefix("- "), proj or "")
+        insert_pending_mission(clean.removeprefix("- "), proj)
 
     def _action_pause(self, instance_dir: str) -> None:
         """Write .koan-pause to pause the agent."""

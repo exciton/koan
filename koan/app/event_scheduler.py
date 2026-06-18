@@ -77,7 +77,7 @@ def tick(instance_dir: str) -> List[str]:
 
         from app.utils import parse_project
         proj, clean = parse_project(mission)
-        insert_pending_mission(instance, clean.removeprefix("- "), proj or "")
+        insert_pending_mission(clean.removeprefix("- "), proj)
         enqueued.append(mission)
 
         archive_dir.mkdir(parents=True, exist_ok=True)

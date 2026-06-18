@@ -488,8 +488,9 @@ def test_detach_returns_true(tmp_path):
     assert app._detached is True
 
 
-def test_new_mission_queues_to_missions_md(tmp_path):
+def test_new_mission_queues_to_missions_md(tmp_path, monkeypatch):
     _write_config(tmp_path, "x: 1\n")
+    monkeypatch.setattr("app.utils.KOAN_ROOT", tmp_path)
 
     async def scenario():
         app = tui.KoanDashboard(tmp_path)

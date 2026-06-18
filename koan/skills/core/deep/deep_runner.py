@@ -219,7 +219,7 @@ def _queue_missions(
             urgent = findings[i].priority == "high"
         project, text = parse_project(entry)
         text = text.removeprefix("- ")
-        insert_pending_mission(instance_dir, text, project or "", urgent=urgent)
+        insert_pending_mission(text, project, urgent=urgent)
 
 
 def run_deep_exploration(

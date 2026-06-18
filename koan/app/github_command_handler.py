@@ -1132,7 +1132,7 @@ def _try_assignment_notification(
     )
 
     try:
-        inserted = insert_pending_mission(assign_instance_dir, mission_text, project_name)
+        inserted = insert_pending_mission(mission_text, project_name)
     except OSError as e:
         log.warning("GitHub assign: failed to insert mission: %s", e)
         mark_notification_read(notif_id)
@@ -1419,7 +1419,7 @@ def process_single_notification(
             proj, text = parse_project(entry)
             text = text.removeprefix("- ")
             inserted_any = insert_pending_mission(
-                notif_instance_dir, text, proj or project_name or "", urgent=urgent,
+                text, proj or project_name or "", urgent=urgent,
             ) or inserted_any
     except OSError as e:
         log.warning("GitHub: failed to insert mission: %s", e)
@@ -1636,7 +1636,7 @@ def _try_subscription_notification(
 
     subscribe_instance_dir = Path(koan_root) / "instance"
     try:
-        inserted = insert_pending_mission(subscribe_instance_dir, mission_text, project_name)
+        inserted = insert_pending_mission(mission_text, project_name)
     except OSError as e:
         log.warning("GitHub subscribe: failed to insert mission: %s", e)
         return False

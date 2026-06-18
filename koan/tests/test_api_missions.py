@@ -23,7 +23,8 @@ def instance_dir(tmp_path):
 
 @pytest.fixture
 def api_client(tmp_path, instance_dir):
-    with patch.dict(os.environ, {"KOAN_API_TOKEN": _TOKEN, "KOAN_ROOT": str(tmp_path)}):
+    with patch.dict(os.environ, {"KOAN_API_TOKEN": _TOKEN, "KOAN_ROOT": str(tmp_path)}), \
+         patch("app.utils.KOAN_ROOT", tmp_path):
         app = create_app(koan_root=tmp_path, instance_dir=instance_dir)
         app.config["TESTING"] = True
         with app.test_client() as client:

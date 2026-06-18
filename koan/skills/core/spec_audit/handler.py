@@ -50,6 +50,6 @@ def _queue_spec_audit(ctx, project_name):
             return "\u274c No projects configured."
         project_name = projects[0][0]
 
-    insert_pending_mission(ctx.instance_dir, "/spec_audit", project_name)
+    insert_pending_mission("/spec_audit", project_name)
 
     return f"\U0001f4d0 Spec-drift audit queued for {project_name}"

@@ -107,7 +107,7 @@ def create_mission():
         return jsonify({"error": {"code": "invalid_request", "message": str(e)}}), 422
 
     from app.utils import insert_pending_mission
-    insert_pending_mission(_instance_dir(), text, project, urgent=urgent)
+    insert_pending_mission(text, project, urgent=urgent)
 
     entry = _build_entry(text, project)
     mission_id = record_mission(_instance_dir(), entry, project)

@@ -105,7 +105,7 @@ def _queue_incident(ctx, project_name, error_text):
     if len(error_text) > _MAX_ERROR_LENGTH:
         truncated += "\n[... truncated]"
 
-    insert_pending_mission(ctx.instance_dir, f"/incident {truncated}", project_label)
+    insert_pending_mission(f"/incident {truncated}", project_label)
 
     preview = error_text[:80].replace("\n", " ")
     return (

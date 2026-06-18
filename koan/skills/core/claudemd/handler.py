@@ -36,6 +36,6 @@ def handle(ctx):
         return f"Project '{project_name}' not found. Known projects: {names}"
 
     # Queue the mission with clean format
-    insert_pending_mission(ctx.instance_dir, f"/claudemd {matched_name}", matched_name)
+    insert_pending_mission(f"/claudemd {matched_name}", matched_name)
 
     return f"CLAUDE.md refresh queued for project {matched_name}"

@@ -212,7 +212,7 @@ def _queue_rebase(owner, repo, pr_number, instance_dir,
         f"Rebase PR #{pr_number} "
         f"({owner}/{repo}) \u2014 run: `{cmd}`"
     )
-    insert_pending_mission(instance_dir, mission_text, project_name)
+    insert_pending_mission(mission_text, project_name)
 
 
 def _queue_pr_review(owner, repo, pr_number, instance_dir):
@@ -226,7 +226,7 @@ def _queue_pr_review(owner, repo, pr_number, instance_dir):
         f"Review PR #{pr_number} "
         f"({owner}/{repo}) \u2014 /pr {pr_url}"
     )
-    insert_pending_mission(instance_dir, mission_text, project_name)
+    insert_pending_mission(mission_text, project_name)
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +308,7 @@ def _queue_plan(owner, repo, issue_number, title, instance_dir, koan_root):
             f"\u2014 /plan {issue_url}"
         )
 
-    insert_pending_mission(instance_dir, mission_text, project_name)
+    insert_pending_mission(mission_text, project_name)
 
 
 def _resolve_project_name(repo, owner=None):

@@ -37,6 +37,6 @@ def handle(ctx):
     from app.utils import insert_pending_mission
 
     file_path = args.strip()
-    insert_pending_mission(ctx.instance_dir, f"/refactor {file_path}")
+    insert_pending_mission(f"/refactor {file_path}")
 
     return f"Refactor queued for {file_path}"

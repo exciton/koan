@@ -52,7 +52,7 @@ def handle(ctx):
     elif mission_text.lower().startswith("mission :"):
         mission_text = mission_text[9:].strip()
 
-    insert_pending_mission(ctx.instance_dir, mission_text, project or "", urgent=urgent)
+    insert_pending_mission(mission_text, project, urgent=urgent)
 
     ack = "✅ Mission received"
     if urgent:

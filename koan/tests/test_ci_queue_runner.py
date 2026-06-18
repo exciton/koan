@@ -381,8 +381,8 @@ class TestInjectCiFixMission:
         assert result is True
         mock_insert.assert_called_once()
         call_args = mock_insert.call_args
-        assert "/ci_check" in call_args[0][1]
-        assert PR_URL in call_args[0][1]
+        assert "/ci_check" in call_args[0][0]
+        assert PR_URL in call_args[0][0]
         assert call_args[1]["urgent"] is True
 
     def test_returns_false_when_duplicate(self):
@@ -403,8 +403,8 @@ class TestInjectCiFixMission:
         with patch("app.utils.insert_pending_mission", return_value=True) as mock_insert:
             _inject_ci_fix_mission("/tmp/instance", PR_URL, entry)
 
-        mission_text = mock_insert.call_args[0][1]
-        assert "[project:my-toolkit]" in mission_text
+        project = mock_insert.call_args[0][1]
+        assert project == "my-toolkit"
 
 
 class TestCheckPrStateSafe:

@@ -248,7 +248,7 @@ def _queue_mission(instance_dir, project_name: str, mission_text: str):
     """Queue a mission to missions.md with dedup."""
     from app.utils import insert_pending_mission
 
-    insert_pending_mission(instance_dir, mission_text, project_name)
+    insert_pending_mission(mission_text, project_name)
 
 
 # ---------------------------------------------------------------------------

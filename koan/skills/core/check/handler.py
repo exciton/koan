@@ -51,6 +51,6 @@ def handle(ctx):
     # Queue the mission with clean format
     from app.utils import insert_pending_mission
 
-    insert_pending_mission(ctx.instance_dir, f"/check {url}", project_name)
+    insert_pending_mission(f"/check {url}", project_name)
 
     return f"\U0001f50d Check queued for {label}"

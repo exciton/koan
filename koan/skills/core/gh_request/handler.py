@@ -74,7 +74,7 @@ def handle(ctx) -> Optional[str]:
         # Use plain text (no /gh_request prefix) so Claude handles it naturally.
         mission_text = f"{url} {request_text}".strip() if url else request_text
         from app.utils import insert_pending_mission
-        insert_pending_mission(ctx.instance_dir, mission_text, project_name)
+        insert_pending_mission(mission_text, project_name)
         return f"Request queued for {project_name}: {request_text[:80]}"
 
     # Build the mission with the classified command

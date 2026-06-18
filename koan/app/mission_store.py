@@ -390,8 +390,10 @@ class MissionStore:
         """Create a new pending mission record.
 
         Checks for duplicates using :func:`app.missions.canonical_mission_key`.
-        If a record with the same canonical key already exists (regardless of
-        status), returns the existing record without creating a duplicate.
+        If a record with the same canonical key already exists in *pending* or
+        *in_progress* state, returns the existing record without creating a
+        duplicate.  Done/Failed records are not considered duplicates — a
+        completed mission can be re-queued (e.g., re-review after new commits).
 
         Args:
             text: Clean mission text (no lifecycle markers).
@@ -401,11 +403,17 @@ class MissionStore:
                 (next to be picked up) instead of the bottom (FIFO).
 
         Returns:
-            The new (or existing) :class:`MissionRecord`.
+            The new (or existing active) :class:`MissionRecord`.
         """
         from app.missions import canonical_mission_key  # lazy import
 
-        existing = self.find(text)
+        needle = canonical_mission_key(text)
+        existing = next(
+            (r for r in self._records
+             if r.status in ("pending", "in_progress")
+             and canonical_mission_key(r.text) == needle),
+            None,
+        )
         if existing is not None:
             return existing
 

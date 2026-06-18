@@ -343,7 +343,7 @@ def _queue_plan_mission(project_path, issue_url):
             return
 
         project_label = project_name_for_path(project_path)
-        insert_pending_mission(deepplan_instance_dir, f"/plan {issue_url}", project_label)
+        insert_pending_mission(f"/plan {issue_url}", project_label)
     except Exception as e:
         print(f"[deepplan_runner] Failed to queue /plan mission: {e}", file=sys.stderr)
 

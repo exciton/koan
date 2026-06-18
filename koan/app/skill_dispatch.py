@@ -1141,7 +1141,7 @@ def expand_combo_skill(
     # of Pending by default, so FIFO ordering is preserved).
     for sub_cmd in sub_commands:
         mission_text = f"/{sub_cmd} {args}".rstrip()
-        insert_pending_mission(instance_dir, mission_text, project_id or "")
+        insert_pending_mission(mission_text, project_id)
 
     print(
         f"  Combo skill /{command} expanded into: "

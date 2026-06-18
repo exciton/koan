@@ -99,7 +99,7 @@ def _queue_brainstorm(ctx, project_name, mission_text, topic):
 
     project_label = project_name or _project_name_for_path(project_path)
 
-    insert_pending_mission(ctx.instance_dir, mission_text, project_label)
+    insert_pending_mission(mission_text, project_label)
 
     preview = topic[:100] + ('...' if len(topic) > 100 else '')
     return f"\U0001f9e0 Brainstorm queued: {preview} (project: {project_label})"

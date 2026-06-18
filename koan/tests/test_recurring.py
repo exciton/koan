@@ -4,6 +4,7 @@ import json
 import pytest
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from app.recurring import (
     load_recurring,
@@ -270,7 +271,9 @@ class TestIsDue:
 
 class TestCheckAndInject:
     def _setup_missions(self, tmp_path):
-        missions_path = tmp_path / "missions.md"
+        instance_dir = tmp_path / "instance"
+        instance_dir.mkdir(exist_ok=True)
+        missions_path = instance_dir / "missions.md"
         missions_path.write_text(
             "# Missions\n\n"
             "## Pending\n\n"
@@ -291,7 +294,8 @@ class TestCheckAndInject:
         add_recurring(recurring_path, "daily", "check emails")
 
         now = datetime(2026, 2, 3, 8, 0)
-        result = check_and_inject(recurring_path, tmp_path, now)
+        with patch("app.utils.KOAN_ROOT", tmp_path):
+            result = check_and_inject(recurring_path, tmp_path, now)
 
         assert len(result) == 1
         assert "check emails" in result[0]
@@ -330,7 +334,8 @@ class TestCheckAndInject:
         add_recurring(recurring_path, "weekly", "audit security", project="koan")
 
         now = datetime(2026, 2, 3, 8, 0)
-        check_and_inject(recurring_path, tmp_path, now)
+        with patch("app.utils.KOAN_ROOT", tmp_path):
+            check_and_inject(recurring_path, tmp_path, now)
 
         content = missions_path.read_text()
         assert "[project:koan]" in content
@@ -501,7 +506,9 @@ class TestFormatWithEvery:
 
 class TestCheckAndInjectEvery:
     def _setup_missions(self, tmp_path):
-        missions_path = tmp_path / "missions.md"
+        instance_dir = tmp_path / "instance"
+        instance_dir.mkdir(exist_ok=True)
+        missions_path = instance_dir / "missions.md"
         missions_path.write_text(
             "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n"
         )
@@ -513,7 +520,8 @@ class TestCheckAndInjectEvery:
         add_recurring_interval(recurring_path, 300, "5m", "check design", project="nocrm")
 
         now = datetime(2026, 2, 3, 8, 0)
-        result = check_and_inject(recurring_path, tmp_path, now)
+        with patch("app.utils.KOAN_ROOT", tmp_path):
+            result = check_and_inject(recurring_path, tmp_path, now)
         assert len(result) == 1
         content = missions_path.read_text()
         assert "[every 5m]" in content
@@ -895,7 +903,9 @@ class TestIsDueWithDays:
 
 class TestForceRun:
     def _setup_missions(self, tmp_path):
-        missions_path = tmp_path / "missions.md"
+        instance_dir = tmp_path / "instance"
+        instance_dir.mkdir(exist_ok=True)
+        missions_path = instance_dir / "missions.md"
         missions_path.write_text(
             "# Missions\n\n## Pending\n\n## In Progress\n\n## Done\n\n"
         )
@@ -908,7 +918,8 @@ class TestForceRun:
         add_recurring(recurring_path, "daily", "task 2")
 
         now = datetime(2026, 2, 3, 10, 0)
-        result = force_run(recurring_path, tmp_path, identifier="1", now=now)
+        with patch("app.utils.KOAN_ROOT", tmp_path):
+            result = force_run(recurring_path, tmp_path, identifier="1", now=now)
 
         assert len(result) == 1
         assert "task 1" in result[0]
@@ -934,7 +945,8 @@ class TestForceRun:
         add_recurring(recurring_path, "daily", "task 2")
 
         now = datetime(2026, 2, 3, 10, 0)
-        result = force_run(recurring_path, tmp_path, identifier=None, now=now)
+        with patch("app.utils.KOAN_ROOT", tmp_path):
+            result = force_run(recurring_path, tmp_path, identifier=None, now=now)
 
         assert len(result) == 2
         missions_content = missions_path.read_text()

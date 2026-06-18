@@ -392,7 +392,7 @@ def _queue_missions(
     queued = 0
 
     for title in missions[:max_missions]:
-        insert_pending_mission(instance_dir, title, project_name)
+        insert_pending_mission(title, project_name)
         queued += 1
 
     return queued
