@@ -60,7 +60,7 @@ Use the store mutators, which already return an explicit `found: bool`:
 ```python
 # Good — store mutators return an explicit found flag
 with locked_store(instance_dir) as store:
-    found = store.complete(needle)   # start()/fail()/cancel()/edit() also return bool
+    found = store.complete(needle)   # start()/fail()/cancel_pending()/edit() also return bool
 return found
 
 # Bad — infers found from content diff (breaks when pruning fires)

@@ -35,8 +35,10 @@ The mission queue is the canonical example: all mutations go through
 load → mutate → save cycle and regenerates `missions.md` from `missions.json`.
 `missions.md` is a read-only view — no code writes it directly. New code that
 needs to queue or change a mission must use the store (or the
-`utils.insert_pending_mission()` helper, which wraps it), never a hand-rolled
-text edit of `missions.md`.
+`utils.insert_pending_mission(text, project=None, *, urgent=False)` helper, which
+wraps it), never a hand-rolled text edit of `missions.md`. The `project` parameter
+accepts `str | None`; `None` and `""` both mean "no project" and are normalized
+internally.
 
 The bridge and runner are separate processes, so bugs that are harmless in a
 single process can corrupt state when both daemons are active.
