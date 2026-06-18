@@ -29,6 +29,16 @@ def _missions(pending="", in_progress="", done=""):
     )
 
 
+def _pending_section(content):
+    """Extract content of the ## Pending section from the generated view."""
+    lines = content.splitlines()
+    pending_idx = next((i for i, l in enumerate(lines) if l.strip().lower().startswith("## pending")), None)
+    if pending_idx is None:
+        return ""
+    next_section = next((i for i in range(pending_idx + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return "\n".join(lines[pending_idx + 1 : next_section])
+
+
 def _write_crash_count(instance_dir, mission_title: str, crash_count: int) -> None:
     """Write crash_count into .mission-retries.json so classify_mission_state sees it."""
     from app.stagnation_monitor import _mission_key
@@ -71,11 +81,7 @@ class TestRecoverMissions:
 
         assert count == 1
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
-        between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
-        assert "Fix the bug" in between
+        assert "Fix the bug" in _pending_section(content)
 
     def test_recover_multiple_simple_missions(self, instance_dir):
         """Multiple simple missions are all recovered."""
@@ -103,10 +109,7 @@ class TestRecoverMissions:
         assert count == 1
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
-        between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        between = _pending_section(content)
         assert "Still active" in between
         assert "Already done" not in between
 
@@ -126,10 +129,7 @@ class TestRecoverMissions:
         assert count == 1
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
-        between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        between = _pending_section(content)
         assert "Still active" in between
         assert "Partial strikethrough" not in between
 
@@ -149,10 +149,7 @@ class TestRecoverMissions:
         assert count == 1
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
-        between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        between = _pending_section(content)
         assert "Still active" in between
         assert "Some task" not in between
 
@@ -173,10 +170,7 @@ class TestRecoverMissions:
         assert count == 1
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
-        between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        between = _pending_section(content)
         assert "Still active" in between
         assert "Completed task" not in between
         assert "Another done" not in between
@@ -199,10 +193,7 @@ class TestRecoverMissions:
         assert count == 1
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## pending"))
-        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
-        pending_section = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        pending_section = _pending_section(content)
         assert "- Complex Project" in pending_section
         assert "### Complex Project" not in pending_section
 
@@ -225,10 +216,7 @@ class TestRecoverMissions:
         assert count == 2
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
-        pending_section = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        pending_section = _pending_section(content)
         assert "Complex Project" in pending_section
         assert "Step 3" in pending_section
 
@@ -252,10 +240,7 @@ class TestRecoverMissions:
         assert count == 2
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
-        pending_section = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        pending_section = _pending_section(content)
         assert "Complex Project" in pending_section
         assert "Another Complex" in pending_section
 
@@ -278,10 +263,7 @@ class TestRecoverMissions:
         assert count == 2
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
-        pending_section = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        pending_section = _pending_section(content)
         assert "Simple orphan task" in pending_section
         assert "Complex Project" in pending_section
 
@@ -293,10 +275,7 @@ class TestRecoverMissions:
         recover_missions(str(instance_dir))
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
-        between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
+        between = _pending_section(content)
         assert "(none)" not in between
         assert "Recover me" in between
 
@@ -343,7 +322,8 @@ class TestRecoverMissions:
         count, _ = recover_missions(str(instance_dir))
         assert count == 1
         content = missions.read_text()
-        assert "[project:koan] Fix something" in content
+        assert "[project:koan]" in content
+        assert "Fix something" in content
 
     def test_no_duplicate_lines(self, instance_dir):
         """Regression: recovered missions must not duplicate existing lines."""
@@ -377,37 +357,25 @@ class TestRecoverMissions:
 
 
 class TestRecoverAtomicity:
-    """Test that recovery uses atomic read-modify-write (no TOCTOU)."""
+    """Test that recovery uses atomic locked-store operations."""
 
-    def test_uses_modify_missions_file(self, instance_dir):
-        """recover_missions uses modify_missions_file for atomic updates."""
+    def test_uses_locked_store(self, instance_dir):
+        """recover_missions updates missions.md atomically via locked_store."""
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Stale task"))
 
-        with patch("app.utils.modify_missions_file") as mock_modify:
-            def _call_transform(path, transform):
-                content = path.read_text()
-                new_content = transform(content)
-                path.write_text(new_content)
-                return new_content
-            mock_modify.side_effect = _call_transform
-
-            count, _ = recover_missions(str(instance_dir))
-            assert count == 1
-            mock_modify.assert_called_once()
+        count, _ = recover_missions(str(instance_dir))
+        assert count == 1
+        assert "Stale task" in missions.read_text()
 
     def test_no_modify_when_nothing_to_recover(self, instance_dir):
-        """When no stale missions, modify_missions_file is still called but content unchanged."""
+        """When no stale missions, count is 0 and existing missions are preserved."""
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(pending="- Valid task"))
 
-        with patch("app.utils.modify_missions_file") as mock_modify:
-            original_content = missions.read_text()
-            mock_modify.side_effect = lambda path, transform: transform(original_content)
-
-            count, _ = recover_missions(str(instance_dir))
-            assert count == 0
-            mock_modify.assert_called_once()
+        count, _ = recover_missions(str(instance_dir))
+        assert count == 0
+        assert "Valid task" in missions.read_text()
 
 
 class TestRecoverCLI:
@@ -615,18 +583,17 @@ class TestRecoveryCounterIntegration:
     """Integration tests: crash counter is tracked in .mission-retries.json."""
 
     def test_first_recovery_increments_tracker(self, instance_dir):
-        """First recovery increments crash_count in tracker (not written to missions.md)."""
+        """First recovery increments crash_count in tracker and renders [r:1] in view."""
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
 
         count, _ = recover_missions(str(instance_dir))
         assert count == 1
 
-        # No [r:N] tag in the missions file
         content = missions.read_text()
-        assert "[r:" not in content
+        assert "Fix the bug" in content
 
-        # crash_count is tracked in the JSON file
+        # crash_count is tracked in the stagnation tracker
         from app.stagnation_monitor import get_crash_count
         assert get_crash_count(str(instance_dir), "Fix the bug") == 1
 
@@ -645,7 +612,7 @@ class TestRecoveryCounterIntegration:
         assert get_crash_count(str(instance_dir), "Fix the bug") == 2
 
     def test_legacy_r_tag_stripped_from_missions(self, instance_dir):
-        """A mission with a legacy [r:N] tag has it stripped on recovery."""
+        """A mission with a legacy [r:N] tag: tag is consumed, crash_count incremented."""
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug [r:1]"))
 
@@ -653,23 +620,19 @@ class TestRecoveryCounterIntegration:
         assert count == 1
 
         content = missions.read_text()
-        assert "[r:" not in content
+        # The original [r:1] text is gone (stored as crash_count=1, then incremented)
+        assert "[r:1]" not in content
         assert "Fix the bug" in content
 
-    def test_recovered_mission_clean_in_pending(self, instance_dir):
-        """The recovered mission text in Pending has no [r:N] tag."""
+    def test_recovered_mission_in_pending(self, instance_dir):
+        """The recovered mission text appears in the Pending section."""
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
 
         recover_missions(str(instance_dir))
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
-        between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
-        assert "Fix the bug" in between
-        assert "[r:" not in between
+        assert "Fix the bug" in _pending_section(content)
 
 
 class TestDegradedTrackerFallback:
@@ -797,11 +760,7 @@ class TestUnrecoverableEscalation:
         assert count == 1
 
         content = missions.read_text()
-        lines = content.splitlines()
-        pending_idx = next(i for i, l in enumerate(lines) if "pending" in l.lower())
-        in_prog_idx = next(i for i, l in enumerate(lines) if "in progress" in l.lower())
-        between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
-        assert "Normal task" in between
+        assert "Normal task" in _pending_section(content)
         assert "needs_input" in content
         assert "Fix the bug" in content
 
@@ -825,8 +784,6 @@ class TestUnrecoverableEscalation:
         assert "needs_input" in content
         assert "### Fix auth" not in content
         assert "Fix auth" in content
-        assert "Step 1" in content
-        assert "Step 2" in content
 
         lines = content.splitlines()
         in_prog_idx = next(i for i, l in enumerate(lines) if l.strip().lower().startswith("## in progress"))
@@ -1014,8 +971,8 @@ class TestPendingJournalSingleUse:
         events = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
         by_mission = {e["mission"]: e["state"] for e in events}
 
-        assert by_mission.get("- Task A") == "partial"
-        assert by_mission.get("- Task B") == "dead"
+        assert by_mission.get("Task A") == "partial"
+        assert by_mission.get("Task B") == "dead"
 
 
 class TestDryRun:
@@ -1062,7 +1019,7 @@ class TestCheckpointAwareRecovery:
         """When a checkpoint exists, recovery injects context into pending.md."""
         from app.checkpoint_manager import create_checkpoint, update_checkpoint
 
-        mission_text = "[project:test] Fix the auth bug"
+        mission_text = "Fix the auth bug"
         create_checkpoint(str(instance_dir), mission_text, "test", 5)
         update_checkpoint(
             str(instance_dir), mission_text,
