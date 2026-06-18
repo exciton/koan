@@ -31,6 +31,12 @@ def _get_version() -> str:
     return get_version()
 
 
+def _get_branch() -> str:
+    """Return current git branch name."""
+    from app.version import get_branch
+    return get_branch()
+
+
 def _truncate(text: str, max_len: int = 60) -> str:
     """Truncate text with ellipsis."""
     if len(text) <= max_len:
@@ -132,7 +138,15 @@ def _handle_status(ctx) -> str:
     missions_file = instance_dir / "missions.md"
 
     version = _get_version()
-    parts = [f"◉ Kōan Status ({version})" if version else "◉ Kōan Status"]
+    branch = _get_branch()
+    if version and branch:
+        parts = [f"◉ Kōan Status ({branch} - {version})"]
+    elif version:
+        parts = [f"◉ Kōan Status ({version})"]
+    elif branch:
+        parts = [f"◉ Kōan Status ({branch})"]
+    else:
+        parts = ["◉ Kōan Status"]
 
     pause_file = koan_root / ".koan-pause"
     stop_file = koan_root / ".koan-stop"

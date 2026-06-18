@@ -40,6 +40,39 @@ class TestGetVersion:
             assert get_version() == ""
 
 
+class TestGetBranch:
+    """Test app.version.get_branch()."""
+
+    def test_returns_branch_name(self):
+        from app.version import get_branch
+        mock_result = MagicMock(returncode=0, stdout="main\n")
+        with patch("app.version.subprocess.run", return_value=mock_result):
+            assert get_branch() == "main"
+
+    def test_feature_branch(self):
+        from app.version import get_branch
+        mock_result = MagicMock(returncode=0, stdout="koan.atoomic/fix-thing\n")
+        with patch("app.version.subprocess.run", return_value=mock_result):
+            assert get_branch() == "koan.atoomic/fix-thing"
+
+    def test_git_failure(self):
+        from app.version import get_branch
+        mock_result = MagicMock(returncode=128, stdout="")
+        with patch("app.version.subprocess.run", return_value=mock_result):
+            assert get_branch() == ""
+
+    def test_git_not_found(self):
+        from app.version import get_branch
+        with patch("app.version.subprocess.run", side_effect=FileNotFoundError):
+            assert get_branch() == ""
+
+    def test_timeout(self):
+        from app.version import get_branch
+        with patch("app.version.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired("git", 5)):
+            assert get_branch() == ""
+
+
 class TestVersionSkill:
     """Test the /version skill handler."""
 

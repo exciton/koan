@@ -1108,22 +1108,46 @@ class TestGetVersion:
         with patch("subprocess.run", side_effect=FileNotFoundError):
             assert _get_version() == ""
 
-    def test_version_in_status_header(self, tmp_path):
-        """Version appears in Kōan Status header."""
+    def test_version_and_branch_in_status_header(self, tmp_path):
+        """Version and branch appear in Kōan Status header."""
         instance = tmp_path / "instance"
         instance.mkdir()
         from skills.core.status.handler import _handle_status
         ctx = _make_ctx("status", instance, tmp_path)
-        with patch("skills.core.status.handler._get_version", return_value="v0.73"):
+        with patch("skills.core.status.handler._get_version", return_value="v0.73"), \
+             patch("skills.core.status.handler._get_branch", return_value="main"):
+            result = _handle_status(ctx)
+        assert "◉ Kōan Status (main - v0.73)" in result
+
+    def test_version_only_no_branch(self, tmp_path):
+        """Version without branch omits branch prefix."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        from skills.core.status.handler import _handle_status
+        ctx = _make_ctx("status", instance, tmp_path)
+        with patch("skills.core.status.handler._get_version", return_value="v0.73"), \
+             patch("skills.core.status.handler._get_branch", return_value=""):
             result = _handle_status(ctx)
         assert "◉ Kōan Status (v0.73)" in result
 
-    def test_no_version_no_parens(self, tmp_path):
-        """Empty version = no parentheses in header."""
+    def test_branch_only_no_version(self, tmp_path):
+        """Branch without version shows branch alone."""
         instance = tmp_path / "instance"
         instance.mkdir()
         from skills.core.status.handler import _handle_status
         ctx = _make_ctx("status", instance, tmp_path)
-        with patch("skills.core.status.handler._get_version", return_value=""):
+        with patch("skills.core.status.handler._get_version", return_value=""), \
+             patch("skills.core.status.handler._get_branch", return_value="main"):
+            result = _handle_status(ctx)
+        assert "◉ Kōan Status (main)" in result
+
+    def test_no_version_no_branch_no_parens(self, tmp_path):
+        """Empty version and branch = no parentheses in header."""
+        instance = tmp_path / "instance"
+        instance.mkdir()
+        from skills.core.status.handler import _handle_status
+        ctx = _make_ctx("status", instance, tmp_path)
+        with patch("skills.core.status.handler._get_version", return_value=""), \
+             patch("skills.core.status.handler._get_branch", return_value=""):
             result = _handle_status(ctx)
         assert "◉ Kōan Status\n" in result
