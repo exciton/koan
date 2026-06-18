@@ -4570,7 +4570,7 @@ class TestReviewVerdictInRunReview:
     """Integration: run_review submits verdict after posting comment."""
 
     @patch("app.review_runner.get_review_verdict_config",
-           return_value={"body_enabled": True, "include_blockers": True})
+           return_value={"approved": True, "body_enabled": True, "include_blockers": True})
     @patch("app.review_runner._is_review_requested", return_value=False)
     @patch("app.review_runner._submit_review_verdict", return_value=True)
     @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc"])
@@ -4597,7 +4597,7 @@ class TestReviewVerdictInRunReview:
         )
 
     @patch("app.review_runner.get_review_verdict_config",
-           return_value={"body_enabled": True, "include_blockers": True})
+           return_value={"approved": True, "body_enabled": True, "include_blockers": True})
     @patch("app.review_runner._is_review_requested", return_value=False)
     @patch("app.review_runner._submit_review_verdict", return_value=True)
     @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc"])
@@ -4624,7 +4624,7 @@ class TestReviewVerdictInRunReview:
         )
 
     @patch("app.review_runner.get_review_verdict_config",
-           return_value={"body_enabled": True, "include_blockers": True})
+           return_value={"approved": True, "body_enabled": True, "include_blockers": True})
     @patch("app.review_runner._is_review_requested", return_value=False)
     @patch("app.review_runner._submit_review_verdict", return_value=True)
     @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc"])
@@ -4694,12 +4694,78 @@ class TestReviewVerdictInRunReview:
         mock_verdict.assert_not_called()
 
 
+    @patch("app.review_runner.get_review_verdict_config",
+           return_value={"approved": False, "body_enabled": True, "include_blockers": True})
+    @patch("app.review_runner._is_review_requested", return_value=False)
+    @patch("app.review_runner._submit_review_verdict", return_value=True)
+    @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc"])
+    @patch("app.review_runner.fetch_repliable_comments", return_value=[])
+    @patch("app.review_runner.run_gh")
+    @patch("app.review_runner._run_claude_review")
+    @patch("app.review_runner.fetch_pr_context")
+    def test_no_verdict_when_approved_disabled(
+        self, mock_fetch, mock_claude, mock_gh, _repliable,
+        _shas, mock_verdict, _mock_req, _mock_cfg, pr_context, review_skill_dir,
+    ):
+        """When approved=False, comment is posted but verdict is skipped."""
+        mock_fetch.return_value = pr_context
+        mock_claude.return_value = (json.dumps(LGTM_REVIEW_JSON), "")
+
+        success, summary, _ = run_review(
+            "owner", "repo", "42", "/tmp/project",
+            notify_fn=MagicMock(), skill_dir=review_skill_dir,
+        )
+        assert success is True
+        mock_verdict.assert_not_called()
+
+
+class TestResolveVerdictConfig:
+    """_resolve_verdict_config merges global + project-level overrides."""
+
+    @patch("app.review_runner.get_review_verdict_config",
+           return_value={"approved": True, "body_enabled": True, "include_blockers": True})
+    def test_returns_global_when_no_project(self, _mock_cfg):
+        from app.review_runner import _resolve_verdict_config
+        cfg = _resolve_verdict_config()
+        assert cfg["approved"] is True
+
+    @patch("app.review_runner.get_review_verdict_config",
+           return_value={"approved": True, "body_enabled": True, "include_blockers": True})
+    def test_returns_global_when_no_koan_root(self, _mock_cfg, monkeypatch):
+        from app.review_runner import _resolve_verdict_config
+        monkeypatch.delenv("KOAN_ROOT", raising=False)
+        cfg = _resolve_verdict_config("myproject")
+        assert cfg["approved"] is True
+
+    @patch("app.review_runner.get_review_verdict_config",
+           return_value={"approved": True, "body_enabled": True, "include_blockers": True})
+    def test_project_override_merges(self, _mock_cfg, monkeypatch):
+        from app.review_runner import _resolve_verdict_config
+        monkeypatch.setenv("KOAN_ROOT", "/tmp/test-koan")
+        with patch("app.projects_config.load_projects_config") as mock_load, \
+             patch("app.projects_config.get_project_review_verdict") as mock_proj:
+            mock_load.return_value = {"projects": {}}
+            mock_proj.return_value = {"approved": False}
+            cfg = _resolve_verdict_config("myproject")
+        assert cfg["approved"] is False
+        assert cfg["body_enabled"] is True
+
+    @patch("app.review_runner.get_review_verdict_config",
+           return_value={"approved": True, "body_enabled": True, "include_blockers": True})
+    def test_fails_closed_on_config_error(self, _mock_cfg, monkeypatch):
+        from app.review_runner import _resolve_verdict_config
+        monkeypatch.setenv("KOAN_ROOT", "/tmp/test-koan")
+        with patch("app.projects_config.load_projects_config", side_effect=RuntimeError("bad config")):
+            cfg = _resolve_verdict_config("myproject")
+        assert cfg["approved"] is False
+
+
 class TestReRequestBypassesIncrementalSkip:
     """When the bot has a pending review request (re-request via Refresh),
     the incremental SHA check is bypassed so a fresh review runs."""
 
     @patch("app.review_runner.get_review_verdict_config",
-           return_value={"body_enabled": True, "include_blockers": True})
+           return_value={"approved": True, "body_enabled": True, "include_blockers": True})
     @patch("app.review_runner._is_review_requested", return_value=True)
     @patch("app.review_runner._submit_review_verdict", return_value=True)
     @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc", "def"])
@@ -4737,7 +4803,7 @@ class TestReRequestBypassesIncrementalSkip:
         mock_verdict.assert_called_once()
 
     @patch("app.review_runner.get_review_verdict_config",
-           return_value={"body_enabled": True, "include_blockers": True})
+           return_value={"approved": True, "body_enabled": True, "include_blockers": True})
     @patch("app.review_runner._is_review_requested", return_value=True)
     @patch("app.review_runner._submit_review_verdict", return_value=True)
     @patch("app.review_runner._fetch_pr_commit_shas", return_value=["abc", "def"])

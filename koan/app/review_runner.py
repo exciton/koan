@@ -1571,6 +1571,25 @@ def _build_verdict_body(
     return "\n".join(lines)
 
 
+def _resolve_verdict_config(project_name: Optional[str] = None) -> dict:
+    """Merge global review_verdict config with project-level overrides."""
+    cfg = get_review_verdict_config()
+    if project_name:
+        try:
+            import os
+            from app.projects_config import load_projects_config, get_project_review_verdict
+            koan_root = os.environ.get("KOAN_ROOT", "")
+            if koan_root:
+                projects_cfg = load_projects_config(koan_root)
+                if projects_cfg:
+                    overrides = get_project_review_verdict(projects_cfg, project_name)
+                    cfg.update(overrides)
+        except Exception as exc:
+            log("review", f"Failed to load project review_verdict overrides: {exc}")
+            cfg["approved"] = False
+    return cfg
+
+
 def _submit_review_verdict(
     owner: str, repo: str, pr_number: str,
     approve: bool, head_sha: str,
@@ -1933,19 +1952,22 @@ def run_review(
         review_summary = review_data.get("review_summary") or {}
         lgtm = review_summary.get("lgtm")
         if isinstance(lgtm, bool) and current_shas:
-            verdict_cfg = get_review_verdict_config()
-            verdict_body = _build_verdict_body(
-                approve=lgtm,
-                review_data=review_data,
-                body_enabled=verdict_cfg["body_enabled"],
-                include_blockers=verdict_cfg["include_blockers"],
-            )
-            verdict_submitted = _submit_review_verdict(
-                owner, repo, pr_number,
-                approve=lgtm,
-                head_sha=current_shas[-1],
-                body=verdict_body,
-            )
+            verdict_cfg = _resolve_verdict_config(project_name)
+            if verdict_cfg["approved"]:
+                verdict_body = _build_verdict_body(
+                    approve=lgtm,
+                    review_data=review_data,
+                    body_enabled=verdict_cfg["body_enabled"],
+                    include_blockers=verdict_cfg["include_blockers"],
+                )
+                verdict_submitted = _submit_review_verdict(
+                    owner, repo, pr_number,
+                    approve=lgtm,
+                    head_sha=current_shas[-1],
+                    body=verdict_body,
+                )
+            else:
+                log("review", f"Verdict submission disabled — skipping on PR #{pr_number}")
 
     # Step 8: Close the PR if the review decided closure is warranted
     closed = False

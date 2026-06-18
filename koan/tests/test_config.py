@@ -1567,7 +1567,14 @@ class TestGetReviewVerdictConfig:
         from app.config import get_review_verdict_config
         with _mock_config({}):
             cfg = get_review_verdict_config()
-        assert cfg == {"body_enabled": True, "include_blockers": True}
+        assert cfg == {"approved": True, "body_enabled": True, "include_blockers": True}
+
+    def test_approved_disabled(self):
+        from app.config import get_review_verdict_config
+        with _mock_config({"review_verdict": {"approved": False}}):
+            cfg = get_review_verdict_config()
+        assert cfg["approved"] is False
+        assert cfg["body_enabled"] is True
 
     def test_body_disabled(self):
         from app.config import get_review_verdict_config
@@ -1583,8 +1590,15 @@ class TestGetReviewVerdictConfig:
         assert cfg["body_enabled"] is True
         assert cfg["include_blockers"] is False
 
-    def test_non_dict_falls_back_to_defaults(self):
+    def test_non_dict_fails_closed(self):
         from app.config import get_review_verdict_config
         with _mock_config({"review_verdict": "garbage"}):
             cfg = get_review_verdict_config()
-        assert cfg == {"body_enabled": True, "include_blockers": True}
+        assert cfg["approved"] is False
+        assert cfg["body_enabled"] is True
+
+    def test_non_bool_value_fails_closed(self):
+        from app.config import get_review_verdict_config
+        with _mock_config({"review_verdict": {"approved": "yes"}}):
+            cfg = get_review_verdict_config()
+        assert cfg["approved"] is False

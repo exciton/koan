@@ -799,11 +799,13 @@ auto_update:
 # review_reflect:
 #   threshold: 5            # Min score to keep a finding (0-10, default: 5)
 
-# Review verdict body — controls the text attached to the formal
-# APPROVE / REQUEST_CHANGES verdict in GitHub's Reviewers panel.
-# The verdict itself (green check / red X) is always submitted;
-# this only controls the accompanying body message.
+# Review verdict — controls the formal APPROVE / REQUEST_CHANGES verdict
+# submitted via the GitHub Pull Request Reviews API.
+# Can also be overridden per-project in projects.yaml.
 # review_verdict:
+#   approved: true              # Submit the verdict status (default: true)
+#                               # Set to false to skip the formal verdict entirely
+#                               # (review comments and PR feedback are still posted)
 #   body_enabled: true          # Include a body with the verdict (default: true)
 #                               # Set to false for a silent verdict (just the check/X)
 #   include_blockers: true      # When REQUEST_CHANGES, list blocking finding titles

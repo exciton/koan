@@ -1446,6 +1446,7 @@ Key per-project settings:
 - **`git_auto_merge`** — Auto-merge completed PRs (strategy: squash/merge/rebase)
 - **`issue_tracker`** — Issue provider routing for GitHub/Jira-backed projects
 - **`security_review`** — Automatic diff analysis for dangerous patterns before auto-merge (see below)
+- **`review_verdict`** — Control formal APPROVE/REQUEST_CHANGES verdict submission (see below)
 - **`authorized_users`** — GitHub users allowed to trigger via @mention
 - **`exploration`** — Enable/disable autonomous exploration
 
@@ -1477,6 +1478,29 @@ projects:
 ```
 
 See [docs/security/security-review.md](../security/security-review.md) for the full list of detected patterns, risk scoring details, and pipeline integration.
+
+#### Review Verdict
+
+Controls the formal APPROVE / REQUEST_CHANGES verdict submitted via the GitHub Pull Request Reviews API after `/review`. Review comments and PR feedback are always posted regardless of this setting.
+
+```yaml
+# instance/config.yaml
+review_verdict:
+  approved: true              # Submit the verdict status (default: true)
+                               # Set to false to skip the formal verdict entirely
+  body_enabled: true           # Include a body with the verdict (default: true)
+  include_blockers: true       # List blocking finding titles in REQUEST_CHANGES body
+```
+
+Per-project override in `projects.yaml`:
+```yaml
+projects:
+  sensitive-repo:
+    review_verdict:
+      approved: false          # Comments only, no formal GitHub verdict
+```
+
+When `approved: false`, the bot still posts review comments and PR feedback but skips the formal GitHub review status (green check / red X in the Reviewers panel). Configuration errors are fail-closed: if loading project overrides fails, or if the `review_verdict` section is malformed (non-dict value or non-boolean entries for known keys), the verdict is skipped to preserve operator intent.
 
 ### Custom Skills
 

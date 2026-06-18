@@ -16,6 +16,7 @@ from app.projects_config import (
     get_project_max_open_prs,
     get_project_max_pending_branches,
     get_project_models,
+    get_project_review_verdict,
     get_project_submit_to_repository,
     get_project_tools,
     resolve_base_branch,
@@ -1466,6 +1467,90 @@ projects:
             "app.git_prep.detect_remote_default_branch", fail_detect,
         )
         assert resolve_base_branch("myrepo", "/tmp/myrepo") == "develop"
+
+
+# ---------------------------------------------------------------------------
+# get_project_review_verdict
+# ---------------------------------------------------------------------------
+
+
+class TestGetProjectReviewVerdict:
+    """Tests for get_project_review_verdict() — per-project verdict overrides."""
+
+    def test_returns_empty_when_not_configured(self):
+        config = {"projects": {"app": {"path": "/app"}}}
+        assert get_project_review_verdict(config, "app") == {}
+
+    def test_returns_approved_false(self):
+        config = {
+            "projects": {
+                "app": {
+                    "path": "/app",
+                    "review_verdict": {"approved": False},
+                }
+            }
+        }
+        result = get_project_review_verdict(config, "app")
+        assert result == {"approved": False}
+
+    def test_returns_all_keys(self):
+        config = {
+            "projects": {
+                "app": {
+                    "path": "/app",
+                    "review_verdict": {
+                        "approved": False,
+                        "body_enabled": False,
+                        "include_blockers": False,
+                    },
+                }
+            }
+        }
+        result = get_project_review_verdict(config, "app")
+        assert result == {"approved": False, "body_enabled": False, "include_blockers": False}
+
+    def test_fails_closed_on_non_bool_values(self):
+        config = {
+            "projects": {
+                "app": {
+                    "path": "/app",
+                    "review_verdict": {"approved": "yes", "body_enabled": True},
+                }
+            }
+        }
+        result = get_project_review_verdict(config, "app")
+        assert result["approved"] is False
+        assert result["body_enabled"] is True
+
+    def test_fails_closed_on_non_dict(self):
+        config = {
+            "projects": {
+                "app": {"path": "/app", "review_verdict": "garbage"},
+            }
+        }
+        result = get_project_review_verdict(config, "app")
+        assert result == {"approved": False}
+
+    def test_inherits_from_defaults(self):
+        config = {
+            "defaults": {"review_verdict": {"approved": False}},
+            "projects": {"app": {"path": "/app"}},
+        }
+        result = get_project_review_verdict(config, "app")
+        assert result == {"approved": False}
+
+    def test_project_overrides_defaults(self):
+        config = {
+            "defaults": {"review_verdict": {"approved": False}},
+            "projects": {
+                "app": {
+                    "path": "/app",
+                    "review_verdict": {"approved": True},
+                }
+            },
+        }
+        result = get_project_review_verdict(config, "app")
+        assert result == {"approved": True}
 
 
 # ---------------------------------------------------------------------------

@@ -47,6 +47,14 @@ defaults:
   #   blocking: false
   #   severity_threshold: high
 
+  # Review verdict — control the formal APPROVE / REQUEST_CHANGES status
+  # submitted via the GitHub Pull Request Reviews API after /review.
+  # Overrides the global review_verdict section in config.yaml.
+  # review_verdict:
+  #   approved: true             # Submit the verdict (default: true)
+  #   body_enabled: true         # Include body text with the verdict
+  #   include_blockers: true     # List blockers in REQUEST_CHANGES body
+
   # CLI provider — which AI CLI to use ("claude", "codex", "copilot", "local")
   # Per-project overrides allow different providers for different repos.
   # Can also be set globally in config.yaml or via KOAN_CLI_PROVIDER env var.
