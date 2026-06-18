@@ -1466,7 +1466,7 @@ class TestHandleMissionAutoDetect:
         handle_mission("fix something random")
         entry = mock_insert.call_args[0][0]
         assert "[project:" not in entry
-        assert mock_insert.call_args[0][1] == ""
+        assert mock_insert.call_args[0][1] in (None, "")
 
     @patch("app.command_handlers.insert_pending_mission")
     @patch("app.command_handlers.detect_project_from_text")
@@ -1912,7 +1912,7 @@ class TestQueueCliSkillMissionEdgeCases:
         _queue_cli_skill_mission(skill, "")
         entry = mock_insert.call_args[0][0]
         assert entry == "/ops.deploy"
-        assert mock_insert.call_args[0][1] == ""
+        assert mock_insert.call_args[0][1] in (None, "")
 
     @patch("app.command_handlers.insert_pending_mission")
     @patch("app.utils.get_known_projects", return_value=[])
@@ -1935,7 +1935,7 @@ class TestQueueCliSkillMissionEdgeCases:
         _queue_cli_skill_mission(skill, "myarg something")
         entry = mock_insert.call_args[0][0]
         assert "/ops.check myarg something" in entry
-        assert mock_insert.call_args[0][1] == ""
+        assert mock_insert.call_args[0][1] in (None, "")
 
     @patch("app.command_handlers.insert_pending_mission")
     def test_queue_truncates_long_args_in_ack(

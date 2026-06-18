@@ -72,16 +72,14 @@ _COMPLEXITY_RE = re.compile(r"\s*\[complexity:([a-zA-Z]+)\]")
 # [flushed], [stagnation], and generic single-word tags in brackets
 _KNOWN_TAG_RE = re.compile(r"\[(flushed|stagnation)\]", re.IGNORECASE)
 
-# Section header display names for the generated view
-_STATUS_HEADERS: Dict[str, str] = {
-    "in_progress": "In Progress",
-    "pending": "Pending",
-    "done": "Done",
-    "failed": "Failed",
-}
-
-# Section render order for to_markdown()
-_VIEW_ORDER = ["in_progress", "pending", "done", "failed"]
+# Section render order and display names for to_markdown().
+# Each tuple is (status_key, header_text); order defines the rendered section order.
+_VIEW_SECTIONS: list = [
+    ("in_progress", "In Progress"),
+    ("pending", "Pending"),
+    ("done", "Done"),
+    ("failed", "Failed"),
+]
 
 # Caps applied in the generated view (not in the JSON store)
 _DONE_CAP = 50
@@ -176,6 +174,11 @@ class MissionRecord:
         )
 
 
+def _view_hash(content: str) -> str:
+    """Return the sha256 hex digest of ``content`` (the Markdown view)."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # Store
 # ---------------------------------------------------------------------------
@@ -237,9 +240,6 @@ class MissionStore:
     # Hashing
     # ------------------------------------------------------------------
 
-    def _view_hash(self, content: str) -> str:
-        """Return the sha256 hex digest of ``content`` (the Markdown view)."""
-        return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     # ------------------------------------------------------------------
     # Persistence
@@ -287,7 +287,7 @@ class MissionStore:
         view_path = store._view_path()
         if view_path.exists():
             current_content = view_path.read_text(encoding="utf-8")
-            current_hash = store._view_hash(current_content)
+            current_hash = _view_hash(current_content)
             if store._last_view_hash is not None and current_hash != store._last_view_hash:
                 # Human edited the Markdown view — reconcile back into the store
                 store._reconcile_from_markdown(current_content)
@@ -307,7 +307,7 @@ class MissionStore:
         from app.utils import atomic_write
 
         view_content = self.to_markdown()
-        view_hash = self._view_hash(view_content)
+        view_hash = _view_hash(view_content)
         self._last_view_hash = view_hash
 
         payload: Dict[str, Any] = {
@@ -382,7 +382,7 @@ class MissionStore:
     def add(
         self,
         text: str,
-        project: str = "",
+        project: str | None = None,
         complexity: Optional[str] = None,
         *,
         urgent: bool = False,
@@ -397,7 +397,7 @@ class MissionStore:
 
         Args:
             text: Clean mission text (no lifecycle markers).
-            project: Project name, or ``""`` if untagged.
+            project: Project name, or ``None``/``""`` if untagged.
             complexity: Optional complexity tier string.
             urgent: When ``True``, insert at the top of the pending queue
                 (next to be picked up) instead of the bottom (FIFO).
@@ -407,18 +407,18 @@ class MissionStore:
         """
         from app.missions import canonical_mission_key  # lazy import
 
-        needle = canonical_mission_key(text)
+        project = project or ""
+
+        # Strip any stray markers the caller may have passed; reuse as dedup key.
+        clean_text = canonical_mission_key(text)
         existing = next(
             (r for r in self._records
              if r.status in ("pending", "in_progress")
-             and canonical_mission_key(r.text) == needle),
+             and canonical_mission_key(r.text) == clean_text),
             None,
         )
         if existing is not None:
             return existing
-
-        # Strip any stray markers the caller may have passed
-        clean_text = canonical_mission_key(text)
 
         record = MissionRecord(
             id=str(uuid.uuid4()),
@@ -621,13 +621,6 @@ class MissionStore:
         self._ideas = [_strip_list_marker(item) for item in parse_ideas(markdown)]
 
         sections = parse_sections(markdown)
-        # Map status key → list of raw item strings
-        section_status_map = {
-            "pending": "pending",
-            "in_progress": "in_progress",
-            "done": "done",
-            "failed": "failed",
-        }
 
         new_count = 0
         # Track which record IDs we've matched so we can preserve unmatched ones
@@ -635,8 +628,8 @@ class MissionStore:
         # New ordering to replace self._records (preserves unmatched records at end)
         new_records: List[MissionRecord] = []
 
-        for section_key, status in section_status_map.items():
-            for raw_item in sections.get(section_key, []):
+        for status in ("pending", "in_progress", "done", "failed"):
+            for raw_item in sections.get(status, []):
                 # Use first line for key derivation (multi-line missions)
                 first_line = raw_item.split("\n")[0].strip()
                 if first_line.startswith("- "):
@@ -700,8 +693,7 @@ class MissionStore:
             lines.extend(f"- {t}" for t in self._ideas)
             lines.append("")
 
-        for status in _VIEW_ORDER:
-            header = _STATUS_HEADERS[status]
+        for status, header in _VIEW_SECTIONS:
             lines.append(f"## {header}")
             lines.append("")
             records = self.get_by_status(status)
@@ -761,6 +753,7 @@ class MissionStore:
         elif r.status == "done":
             ts = r.completed_at or time.strftime("%Y-%m-%d %H:%M")
             parts.append(f"✅ ({ts})")
+            parts.extend(f"[{tag}]" for tag in r.tags)
         elif r.status == "failed":
             ts = r.completed_at or time.strftime("%Y-%m-%d %H:%M")
             parts.append(f"❌ ({ts})")
@@ -961,7 +954,7 @@ class MissionStore:
         from app.utils import parse_project
 
         project, clean = parse_project(idea_text)
-        self.add(clean, project or "", urgent=True)
+        self.add(clean, project, urgent=True)
 
     # ------------------------------------------------------------------
     # Migration (classmethod)
@@ -1007,16 +1000,8 @@ class MissionStore:
 
         sections = parse_sections(content)
 
-        # Section → status ordering for migration (maintain queue order)
-        ordered_sections = [
-            ("in_progress", "in_progress"),
-            ("pending", "pending"),
-            ("done", "done"),
-            ("failed", "failed"),
-        ]
-
-        for section_key, status in ordered_sections:
-            for raw_item in sections.get(section_key, []):
+        for status, _ in _VIEW_SECTIONS:
+            for raw_item in sections.get(status, []):
                 record = _parse_record_from_markdown_line(raw_item, status)
                 if record.text and "~~" not in record.text:
                     store._records.append(record)
@@ -1049,8 +1034,7 @@ def locked_store(instance_dir: str) -> Generator[MissionStore, None, None]:
     ``missions.md`` is regenerated from the store on save and is never
     written directly.
     """
-    store = MissionStore(instance_dir)
-    lock_path = store._lock_path()
+    lock_path = Path(instance_dir) / ".missions-store.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with _STORE_LOCK:
         with open(lock_path, "w") as lf:
