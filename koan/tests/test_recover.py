@@ -64,16 +64,18 @@ def _write_crash_count(instance_dir, mission_title: str, crash_count: int) -> No
 class TestRecoverMissions:
     """Core recovery logic."""
 
-    def test_no_stale_missions(self, instance_dir):
+    def test_no_stale_missions(self, instance_dir, monkeypatch):
         """No recovery needed when in-progress is empty."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         assert recover_missions(str(instance_dir)) == (0, [])
 
     def test_missing_missions_file(self, tmp_path):
         """Returns 0 if missions.md doesn't exist."""
         assert recover_missions(str(tmp_path / "nonexistent")) == (0, [])
 
-    def test_recover_simple_mission(self, instance_dir):
+    def test_recover_simple_mission(self, instance_dir, monkeypatch):
         """Simple - item in 'In Progress' moves back to 'Pending'."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
 
@@ -83,8 +85,9 @@ class TestRecoverMissions:
         content = missions.read_text()
         assert "Fix the bug" in _pending_section(content)
 
-    def test_recover_multiple_simple_missions(self, instance_dir):
+    def test_recover_multiple_simple_missions(self, instance_dir, monkeypatch):
         """Multiple simple missions are all recovered."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(in_progress="- Task A\n- Task B\n- Task C")
@@ -98,8 +101,9 @@ class TestRecoverMissions:
         assert "Task B" in content
         assert "Task C" in content
 
-    def test_skip_strikethrough_missions(self, instance_dir):
+    def test_skip_strikethrough_missions(self, instance_dir, monkeypatch):
         """Fully struck-through items (~~done~~) are NOT recovered."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(in_progress="- ~~Already done~~\n- Still active")
@@ -113,8 +117,9 @@ class TestRecoverMissions:
         assert "Still active" in between
         assert "Already done" not in between
 
-    def test_skip_unclosed_strikethrough(self, instance_dir):
+    def test_skip_unclosed_strikethrough(self, instance_dir, monkeypatch):
         """Unclosed strikethrough (e.g. '- ~~text') is NOT recovered."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(
@@ -133,8 +138,9 @@ class TestRecoverMissions:
         assert "Still active" in between
         assert "Partial strikethrough" not in between
 
-    def test_skip_inline_strikethrough(self, instance_dir):
+    def test_skip_inline_strikethrough(self, instance_dir, monkeypatch):
         """Items containing ~~ anywhere (e.g. '- text ~~done~~') are NOT recovered."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(
@@ -153,8 +159,9 @@ class TestRecoverMissions:
         assert "Still active" in between
         assert "Some task" not in between
 
-    def test_skip_strikethrough_with_trailing_text(self, instance_dir):
+    def test_skip_strikethrough_with_trailing_text(self, instance_dir, monkeypatch):
         """Struck-through items with trailing text (e.g. '~~done~~ merged') are NOT recovered."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(
@@ -175,8 +182,9 @@ class TestRecoverMissions:
         assert "Completed task" not in between
         assert "Another done" not in between
 
-    def test_recover_complex_mission_block(self, instance_dir):
+    def test_recover_complex_mission_block(self, instance_dir, monkeypatch):
         """### header missions with sub-items ARE recovered as a unit to Pending."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(
@@ -197,8 +205,9 @@ class TestRecoverMissions:
         assert "- Complex Project" in pending_section
         assert "### Complex Project" not in pending_section
 
-    def test_blank_line_ends_complex_block(self, instance_dir):
+    def test_blank_line_ends_complex_block(self, instance_dir, monkeypatch):
         """A blank line after complex mission sub-items ends the complex block."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(
@@ -220,8 +229,9 @@ class TestRecoverMissions:
         assert "Complex Project" in pending_section
         assert "Step 3" in pending_section
 
-    def test_two_complex_missions(self, instance_dir):
+    def test_two_complex_missions(self, instance_dir, monkeypatch):
         """Two consecutive complex missions are both recovered."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(
@@ -244,8 +254,9 @@ class TestRecoverMissions:
         assert "Complex Project" in pending_section
         assert "Another Complex" in pending_section
 
-    def test_simple_mission_after_complex_recovered(self, instance_dir):
+    def test_simple_mission_after_complex_recovered(self, instance_dir, monkeypatch):
         """A simple '- ' mission after a complex block (separated by blank line) IS recovered."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(
@@ -267,8 +278,9 @@ class TestRecoverMissions:
         assert "Simple orphan task" in pending_section
         assert "Complex Project" in pending_section
 
-    def test_removes_aucune_placeholder(self, instance_dir):
+    def test_removes_aucune_placeholder(self, instance_dir, monkeypatch):
         """The (none) placeholder is removed from pending when missions are added."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(pending="(none)", in_progress="- Recover me"))
 
@@ -279,8 +291,9 @@ class TestRecoverMissions:
         assert "(none)" not in between
         assert "Recover me" in between
 
-    def test_english_section_names(self, instance_dir):
+    def test_english_section_names(self, instance_dir, monkeypatch):
         """Works with English section names too."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             "# Missions\n\n"
@@ -292,8 +305,9 @@ class TestRecoverMissions:
         count, _ = recover_missions(str(instance_dir))
         assert count == 1
 
-    def test_preserves_existing_pending(self, instance_dir):
+    def test_preserves_existing_pending(self, instance_dir, monkeypatch):
         """Existing pending missions are kept when recovered missions are added."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(pending="- Already pending", in_progress="- Crashed task")
@@ -305,15 +319,17 @@ class TestRecoverMissions:
         assert "Already pending" in content
         assert "Crashed task" in content
 
-    def test_no_sections_returns_zero(self, instance_dir):
+    def test_no_sections_returns_zero(self, instance_dir, monkeypatch):
         """If missions.md has no recognized sections, returns 0."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text("# Random file\n\nSome content\n")
 
         assert recover_missions(str(instance_dir)) == (0, [])
 
-    def test_tagged_missions_preserved(self, instance_dir):
+    def test_tagged_missions_preserved(self, instance_dir, monkeypatch):
         """Project-tagged missions are recovered like any other."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             _missions(in_progress="- [project:koan] Fix something")
@@ -325,8 +341,9 @@ class TestRecoverMissions:
         assert "[project:koan]" in content
         assert "Fix something" in content
 
-    def test_no_duplicate_lines(self, instance_dir):
+    def test_no_duplicate_lines(self, instance_dir, monkeypatch):
         """Regression: recovered missions must not duplicate existing lines."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(
             "# Missions\n\n"
@@ -343,8 +360,9 @@ class TestRecoverMissions:
         assert content.count("Existing task") == 1
         assert content.count("Stale task") == 1
 
-    def test_no_section_headers_duplicated(self, instance_dir):
+    def test_no_section_headers_duplicated(self, instance_dir, monkeypatch):
         """Section headers must not be duplicated after recovery."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Task A\n- Task B"))
 
@@ -359,8 +377,9 @@ class TestRecoverMissions:
 class TestRecoverAtomicity:
     """Test that recovery uses atomic locked-store operations."""
 
-    def test_uses_locked_store(self, instance_dir):
+    def test_uses_locked_store(self, instance_dir, monkeypatch):
         """recover_missions updates missions.md atomically via locked_store."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Stale task"))
 
@@ -368,8 +387,9 @@ class TestRecoverAtomicity:
         assert count == 1
         assert "Stale task" in missions.read_text()
 
-    def test_no_modify_when_nothing_to_recover(self, instance_dir):
+    def test_no_modify_when_nothing_to_recover(self, instance_dir, monkeypatch):
         """When no stale missions, count is 0 and existing missions are preserved."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(pending="- Valid task"))
 
@@ -382,8 +402,9 @@ class TestRecoverCLI:
     """Test the __main__ CLI behavior."""
 
     @patch("app.recover.format_and_send")
-    def test_cli_with_recovery(self, mock_send, instance_dir, capsys):
+    def test_cli_with_recovery(self, mock_send, instance_dir, capsys, monkeypatch):
         """CLI prints count and sends Telegram when missions recovered."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Stale task"))
 
@@ -582,8 +603,9 @@ class TestClassifyMissionState:
 class TestRecoveryCounterIntegration:
     """Integration tests: crash counter is tracked in .mission-retries.json."""
 
-    def test_first_recovery_increments_tracker(self, instance_dir):
+    def test_first_recovery_increments_tracker(self, instance_dir, monkeypatch):
         """First recovery increments crash_count in tracker and renders [r:1] in view."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
 
@@ -597,8 +619,9 @@ class TestRecoveryCounterIntegration:
         from app.stagnation_monitor import get_crash_count
         assert get_crash_count(str(instance_dir), "Fix the bug") == 1
 
-    def test_second_recovery_increments_tracker_again(self, instance_dir):
+    def test_second_recovery_increments_tracker_again(self, instance_dir, monkeypatch):
         """Second recovery increments crash_count to 2."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
 
         missions.write_text(_missions(in_progress="- Fix the bug"))
@@ -611,8 +634,9 @@ class TestRecoveryCounterIntegration:
         from app.stagnation_monitor import get_crash_count
         assert get_crash_count(str(instance_dir), "Fix the bug") == 2
 
-    def test_legacy_r_tag_stripped_from_missions(self, instance_dir):
+    def test_legacy_r_tag_stripped_from_missions(self, instance_dir, monkeypatch):
         """A mission with a legacy [r:N] tag: tag is consumed, crash_count incremented."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug [r:1]"))
 
@@ -624,8 +648,9 @@ class TestRecoveryCounterIntegration:
         assert "[r:1]" not in content
         assert "Fix the bug" in content
 
-    def test_recovered_mission_in_pending(self, instance_dir):
+    def test_recovered_mission_in_pending(self, instance_dir, monkeypatch):
         """The recovered mission text appears in the Pending section."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
 
@@ -652,6 +677,7 @@ class TestDegradedTrackerFallback:
 
     def test_degraded_recovery_persists_inline_counter(self, instance_dir, monkeypatch):
         """Without the tracker, a recovered mission carries an inline [r:1]."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         self._break_tracker_import(monkeypatch)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
@@ -665,6 +691,7 @@ class TestDegradedTrackerFallback:
 
     def test_degraded_recovery_increments_inline_counter(self, instance_dir, monkeypatch):
         """A mission already at [r:1] is bumped to [r:2] on the next degraded cycle."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         self._break_tracker_import(monkeypatch)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug [r:1]"))
@@ -678,6 +705,7 @@ class TestDegradedTrackerFallback:
 
     def test_degraded_recovery_escalates_at_cap(self, instance_dir, monkeypatch):
         """At the inline cap, a degraded mission escalates to Failed instead of looping."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         self._break_tracker_import(monkeypatch)
         missions = instance_dir / "missions.md"
         missions.write_text(
@@ -709,8 +737,9 @@ def _missions_with_failed(pending="", in_progress="", done="", failed=""):
 class TestUnrecoverableEscalation:
     """Missions that have exhausted recovery attempts are escalated to Failed."""
 
-    def test_unrecoverable_not_in_pending(self, instance_dir):
+    def test_unrecoverable_not_in_pending(self, instance_dir, monkeypatch):
         """Unrecoverable missions are NOT moved to Pending."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
         _write_crash_count(instance_dir, "Fix the bug", _DEFAULT_MAX_CRASH_RETRIES)
@@ -725,8 +754,9 @@ class TestUnrecoverableEscalation:
         between = "\n".join(lines[pending_idx + 1 : in_prog_idx])
         assert "Fix the bug" not in between
 
-    def test_unrecoverable_moved_to_failed(self, instance_dir):
+    def test_unrecoverable_moved_to_failed(self, instance_dir, monkeypatch):
         """Unrecoverable missions appear in Failed section with needs_input tag."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions_with_failed(in_progress="- Fix the bug"))
         _write_crash_count(instance_dir, "Fix the bug", _DEFAULT_MAX_CRASH_RETRIES)
@@ -737,8 +767,9 @@ class TestUnrecoverableEscalation:
         assert "needs_input" in content
         assert "Fix the bug" in content
 
-    def test_unrecoverable_creates_failed_section_if_absent(self, instance_dir):
+    def test_unrecoverable_creates_failed_section_if_absent(self, instance_dir, monkeypatch):
         """If no Failed section exists, one is created for escalated missions."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
         _write_crash_count(instance_dir, "Fix the bug", _DEFAULT_MAX_CRASH_RETRIES)
@@ -750,8 +781,9 @@ class TestUnrecoverableEscalation:
         assert "needs_input" in content
         assert "Fix the bug" in content
 
-    def test_mixed_recoverable_and_unrecoverable(self, instance_dir):
+    def test_mixed_recoverable_and_unrecoverable(self, instance_dir, monkeypatch):
         """Recoverable missions go to Pending, unrecoverable go to Failed."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions_with_failed(in_progress="- Normal task\n- Fix the bug"))
         _write_crash_count(instance_dir, "Fix the bug", _DEFAULT_MAX_CRASH_RETRIES)
@@ -764,8 +796,9 @@ class TestUnrecoverableEscalation:
         assert "needs_input" in content
         assert "Fix the bug" in content
 
-    def test_unrecoverable_complex_block_in_failed(self, instance_dir):
+    def test_unrecoverable_complex_block_in_failed(self, instance_dir, monkeypatch):
         """Unrecoverable complex ### block: header appears in Failed, sub-items preserved."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         in_prog = (
             "### Fix auth\n"
@@ -791,12 +824,13 @@ class TestUnrecoverableEscalation:
         in_prog_section = "\n".join(lines[in_prog_idx + 1 : failed_idx])
         assert "Fix auth" not in in_prog_section
 
-    def test_legacy_r_tag_at_limit_triggers_unrecoverable(self, instance_dir):
+    def test_legacy_r_tag_at_limit_triggers_unrecoverable(self, instance_dir, monkeypatch):
         """A mission with legacy [r:N] tag at or above limit is also escalated.
 
         Backward-compat: if [r:N] value exceeds tracker crash_count,
         the tag value is used for the cap check.
         """
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(
             in_progress=f"- Fix the bug [r:{_DEFAULT_MAX_CRASH_RETRIES}]"
@@ -817,8 +851,9 @@ class TestUnrecoverableEscalation:
 class TestRecoveryJSONLLog:
     """Events are logged to recovery.jsonl."""
 
-    def test_log_created_on_recovery(self, instance_dir):
+    def test_log_created_on_recovery(self, instance_dir, monkeypatch):
         """recovery.jsonl is created when a mission is recovered."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
 
@@ -827,8 +862,9 @@ class TestRecoveryJSONLLog:
         log_path = instance_dir / "recovery.jsonl"
         assert log_path.exists()
 
-    def test_log_entry_fields(self, instance_dir):
+    def test_log_entry_fields(self, instance_dir, monkeypatch):
         """Log entry has required fields: timestamp, mission, state, action, attempts."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
 
@@ -846,13 +882,14 @@ class TestRecoveryJSONLLog:
         assert ev["state"] == "dead"
         assert ev["action"] == "recovered"
 
-    def test_passed_has_pending_overrides_file_read(self, instance_dir):
+    def test_passed_has_pending_overrides_file_read(self, instance_dir, monkeypatch):
         """A caller-supplied has_pending_journal is honored without a file read.
 
         No pending.md exists on disk, but passing has_pending_journal=True must
         still classify the mission as 'partial' — proving recover_missions used
         the supplied value instead of reading the file a second time.
         """
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
         assert not (instance_dir / "journal" / "pending.md").exists()
@@ -863,8 +900,9 @@ class TestRecoveryJSONLLog:
         events = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
         assert events[0]["state"] == "partial"
 
-    def test_default_none_still_reads_file(self, instance_dir):
+    def test_default_none_still_reads_file(self, instance_dir, monkeypatch):
         """With no override (daemon path), presence is still read from disk."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
         journal = instance_dir / "journal"
@@ -877,8 +915,9 @@ class TestRecoveryJSONLLog:
         events = [json.loads(line) for line in log_path.read_text().splitlines() if line.strip()]
         assert events[0]["state"] == "partial"
 
-    def test_log_escalated_action(self, instance_dir):
+    def test_log_escalated_action(self, instance_dir, monkeypatch):
         """Unrecoverable missions are logged with action=escalated."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
         _write_crash_count(instance_dir, "Fix the bug", _DEFAULT_MAX_CRASH_RETRIES)
@@ -891,8 +930,9 @@ class TestRecoveryJSONLLog:
         assert len(escalated) == 1
         assert escalated[0]["state"] == "unrecoverable"
 
-    def test_log_counter_stripped_from_mission(self, instance_dir):
+    def test_log_counter_stripped_from_mission(self, instance_dir, monkeypatch):
         """The [r:N] counter is stripped from the logged mission text."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug [r:2]"))
 
@@ -903,8 +943,9 @@ class TestRecoveryJSONLLog:
         assert events
         assert "[r:" not in events[0]["mission"]
 
-    def test_log_appends_across_runs(self, instance_dir):
+    def test_log_appends_across_runs(self, instance_dir, monkeypatch):
         """Multiple recovery runs append to the same log."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
 
         missions.write_text(_missions(in_progress="- Task A"))
@@ -925,9 +966,10 @@ class TestRecoveryJSONLLog:
 class TestRecoverPendingJournalTOCTOU:
     """TOCTOU race: pending.md deleted between exists() and read_text()."""
 
-    def test_pending_deleted_after_exists_check(self, instance_dir):
+    def test_pending_deleted_after_exists_check(self, instance_dir, monkeypatch):
         """If pending.md is deleted between exists() and read_text(), recovery
         should not raise FileNotFoundError."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Stale task"))
 
@@ -953,8 +995,9 @@ class TestRecoverPendingJournalTOCTOU:
 class TestPendingJournalSingleUse:
     """pending.md context should only be claimed by the first in-progress mission."""
 
-    def test_only_first_mission_gets_partial_state(self, instance_dir):
+    def test_only_first_mission_gets_partial_state(self, instance_dir, monkeypatch):
         """With two stale in-progress missions, only the first is 'partial'."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Task A\n- Task B"))
 
@@ -978,8 +1021,9 @@ class TestPendingJournalSingleUse:
 class TestDryRun:
     """Dry-run mode classifies without modifying missions.md."""
 
-    def test_dry_run_no_modification(self, instance_dir):
+    def test_dry_run_no_modification(self, instance_dir, monkeypatch):
         """Dry-run does not change missions.md."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         original = _missions(in_progress="- Fix the bug")
         missions.write_text(original)
@@ -994,8 +1038,9 @@ class TestDryRun:
         in_progress_section = "\n".join(lines[in_prog_idx + 1 : done_idx])
         assert "Fix the bug" in in_progress_section
 
-    def test_dry_run_logs_event(self, instance_dir, capsys):
+    def test_dry_run_logs_event(self, instance_dir, capsys, monkeypatch):
         """Dry-run logs a dry_run event to recovery.jsonl."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
 
@@ -1015,8 +1060,9 @@ class TestDryRun:
 class TestCheckpointAwareRecovery:
     """Tests for checkpoint integration in recovery."""
 
-    def test_recovery_with_checkpoint_injects_context(self, instance_dir):
+    def test_recovery_with_checkpoint_injects_context(self, instance_dir, monkeypatch):
         """When a checkpoint exists, recovery injects context into pending.md."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         from app.checkpoint_manager import create_checkpoint, update_checkpoint
 
         mission_text = "Fix the auth bug"
@@ -1040,8 +1086,9 @@ class TestCheckpointAwareRecovery:
         assert "koan.atoomic/fix-auth" in content
         assert "read auth module" in content
 
-    def test_recovery_without_checkpoint_no_context(self, instance_dir):
+    def test_recovery_without_checkpoint_no_context(self, instance_dir, monkeypatch):
         """Without a checkpoint, no recovery context is injected."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         missions = instance_dir / "missions.md"
         missions.write_text(_missions(in_progress="- Fix the bug"))
 
@@ -1052,8 +1099,9 @@ class TestCheckpointAwareRecovery:
         if pending_path.exists():
             assert "Recovery Context" not in pending_path.read_text()
 
-    def test_recovery_logs_checkpoint_flag(self, instance_dir):
+    def test_recovery_logs_checkpoint_flag(self, instance_dir, monkeypatch):
         """Recovery JSONL log includes has_checkpoint field."""
+        monkeypatch.setattr("app.utils.KOAN_ROOT", instance_dir.parent)
         from app.checkpoint_manager import create_checkpoint
 
         mission_text = "Fix something"
