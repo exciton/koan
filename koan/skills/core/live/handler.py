@@ -22,7 +22,7 @@ def _read_live_progress(instance_dir):
     return content
 
 
-def _get_in_progress_missions(instance_dir):
+def _get_in_progress_missions():
     """Get in-progress missions from missions.md.
 
     Returns a list of (project, mission_text) tuples, or empty list.
@@ -98,7 +98,7 @@ def handle(ctx):
         return _format_progress(progress)
 
     # No pending.md — check if missions are actually in progress
-    missions = _get_in_progress_missions(ctx.instance_dir)
+    missions = _get_in_progress_missions()
     if missions:
         return _format_no_output(missions)
 
