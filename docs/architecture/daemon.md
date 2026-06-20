@@ -25,7 +25,7 @@ process does not stop cleanly.
 - polls Telegram, Slack, Matrix, GitHub, or Jira integration paths as configured;
 - routes slash commands through command handlers and skill dispatch;
 - classifies non-command text as chat or mission intent;
-- appends missions to `instance/missions.md`;
+- queues missions via the mission store (`insert_pending_mission` → `locked_store()`, which regenerates `instance/missions.md`);
 - drains `instance/outbox.md` back to the messaging provider.
 
 Bridge state that would otherwise create circular imports lives in
